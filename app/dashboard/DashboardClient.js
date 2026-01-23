@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/utils/supabase/client";
+import { getSupabaseClient } from "@/utils/supabase/client";
 
 export default function DashboardClient({
   userId,
   initialTienda,
   initialProductos,
 }) {
+  const supabase = getSupabaseClient();
   const [tiendaNombre, setTiendaNombre] = useState(
     initialTienda?.nombre ?? "",
   );
@@ -33,7 +34,7 @@ export default function DashboardClient({
   }, [initialProductos]);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !supabase) return;
 
     const channel = supabase
       .channel(`productos-${userId}`)
@@ -73,13 +74,20 @@ export default function DashboardClient({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [userId]);
+  }, [userId, supabase]);
 
   const totalProductos = useMemo(() => productos.length, [productos]);
 
   const handleSaveTienda = async (event) => {
     event.preventDefault();
     setTiendaStatus("Guardando...");
+
+    if (!supabase) {
+      setTiendaStatus(
+        "Configura las variables de Supabase antes de guardar.",
+      );
+      return;
+    }
 
     const { error } = await supabase.from("tiendas").upsert(
       {
@@ -102,6 +110,14 @@ export default function DashboardClient({
     event.preventDefault();
     setProductosError("");
     setProductosLoading(true);
+
+    if (!supabase) {
+      setProductosError(
+        "Configura las variables de Supabase antes de guardar.",
+      );
+      setProductosLoading(false);
+      return;
+    }
 
     const precio = Number.parseFloat(productoPrecio);
     if (!productoNombre || Number.isNaN(precio) || !productoCategoria) {
@@ -154,6 +170,13 @@ export default function DashboardClient({
     setProductosError("");
     const precio = Number.parseFloat(editingPrecio);
 
+    if (!supabase) {
+      setProductosError(
+        "Configura las variables de Supabase antes de guardar.",
+      );
+      return;
+    }
+
     if (!editingNombre || Number.isNaN(precio) || !editingCategoria) {
       setProductosError("Completa nombre, precio y categoría.");
       return;
@@ -179,6 +202,13 @@ export default function DashboardClient({
   };
 
   const handleToggleVisible = async (producto) => {
+    if (!supabase) {
+      setProductosError(
+        "Configura las variables de Supabase antes de guardar.",
+      );
+      return;
+    }
+
     const { error } = await supabase
       .from("productos")
       .update({ visible: !producto.visible })
@@ -191,6 +221,13 @@ export default function DashboardClient({
   };
 
   const handleDelete = async (productoId) => {
+    if (!supabase) {
+      setProductosError(
+        "Configura las variables de Supabase antes de guardar.",
+      );
+      return;
+    }
+
     const { error } = await supabase
       .from("productos")
       .delete()
@@ -206,6 +243,14 @@ export default function DashboardClient({
     if (!file) return;
     setProductosError("");
     setUploadingId(productoId);
+
+    if (!supabase) {
+      setProductosError(
+        "Configura las variables de Supabase antes de subir.",
+      );
+      setUploadingId(null);
+      return;
+    }
 
     const fileExt = file.name.split(".").pop();
     const safeName = file.name

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/utils/supabase/client";
+import { getSupabaseClient } from "@/utils/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
+  const supabase = getSupabaseClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,6 +20,13 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      if (!supabase) {
+        setError(
+          "Configuracion incompleta. Agrega las variables de Supabase en Vercel.",
+        );
+        return;
+      }
+
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
