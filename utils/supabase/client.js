@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 
 let cachedClient = null;
 
@@ -11,12 +11,15 @@ export const getSupabaseClient = () => {
   if (!supabaseUrl || !supabaseAnonKey) {
     if (typeof window !== "undefined") {
       console.warn(
-        "Missing Supabase env vars. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+        "Missing Supabase env vars. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
       );
     }
     return null;
   }
 
-  cachedClient = createClient(supabaseUrl, supabaseAnonKey);
+  cachedClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
   return cachedClient;
 };
+
+// Alias for backwards compatibility
+export const supabase = typeof window !== "undefined" ? getSupabaseClient() : null;

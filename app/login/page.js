@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/utils/supabase/client";
 
@@ -14,6 +14,39 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Check if already logged in
+  useEffect(() => {
+    const checkSession = async () => {
+      if (!supabase) {
+        setCheckingSession(false);
+        return;
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        window.location.href = "/dashboard";
+        return;
+      }
+      setCheckingSession(false);
+    };
+
+    checkSession();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase?.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "SIGNED_IN" && session) {
+          window.location.href = "/dashboard";
+        }
+      }
+    ) ?? { data: { subscription: null } };
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [supabase]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -55,7 +88,6 @@ export default function LoginPage() {
           return;
         }
 
-        // Check if email confirmation is required
         if (data?.user?.identities?.length === 0) {
           setError("Este correo ya está registrado. Intenta iniciar sesión.");
           setLoading(false);
@@ -65,10 +97,8 @@ export default function LoginPage() {
           );
           setLoading(false);
         } else if (data?.session) {
-          // Auto-confirmed, redirect
           setMessage("¡Cuenta creada! Redirigiendo...");
-          // Force a hard refresh to trigger middleware
-          window.location.href = "/dashboard";
+          // The onAuthStateChange listener will handle the redirect
         }
       } else {
         // LOGIN
@@ -78,7 +108,6 @@ export default function LoginPage() {
         });
 
         if (signInError) {
-          // Translate common errors
           if (signInError.message === "Invalid login credentials") {
             setError("Correo o contraseña incorrectos.");
           } else if (signInError.message === "Email not confirmed") {
@@ -92,19 +121,12 @@ export default function LoginPage() {
 
         if (data?.session) {
           setMessage("¡Bienvenido! Redirigiendo...");
-          // Force a hard refresh to trigger middleware and set cookies
-          window.location.href = "/dashboard";
+          // The onAuthStateChange listener will handle the redirect
         }
       }
     } catch (err) {
       console.error("Auth error:", err);
-      if (err.message === "Failed to fetch") {
-        setError(
-          "No se pudo conectar con el servidor. Verifica que las variables de Supabase estén configuradas correctamente."
-        );
-      } else {
-        setError("Ocurrió un error inesperado. Intenta de nuevo.");
-      }
+      setError("Ocurrió un error inesperado. Intenta de nuevo.");
       setLoading(false);
     }
   };
@@ -116,6 +138,15 @@ export default function LoginPage() {
     setPassword("");
     setConfirmPassword("");
   };
+
+  // Show loading while checking session
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-slate-400">Cargando...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
