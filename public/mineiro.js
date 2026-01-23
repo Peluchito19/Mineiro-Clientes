@@ -412,36 +412,55 @@
       return null;
     }
 
-    // Guardar elementos detectados
-    const elementRows = elements.map(el => ({
-      site_id: siteId,
-      element_id: el.id,
-      type: el.type,
-      name: el.name,
-      xpath: el.xpath,
-      selector: el.selector,
-      context: el.context,
-      original_value: el.currentValue,
-      current_value: el.currentValue,
-      metadata: {
-        tag: el.tag,
-        classes: el.classes,
-        href: el.href,
-        alt: el.alt,
-      }
-    }));
-
-    // Upsert elementos (no sobreescribir current_value si ya existe)
-    for (const row of elementRows) {
-      const { error } = await supabase
+    // Guardar elementos detectados - SIN sobreescribir current_value si ya existe
+    for (const el of elements) {
+      // Verificar si el elemento ya existe
+      const { data: existing } = await supabase
         .from("elements")
-        .upsert(row, { 
-          onConflict: "site_id,element_id",
-          ignoreDuplicates: false 
-        });
-      
-      if (error) {
-        warn(`Error saving element ${row.element_id}:`, error.message);
+        .select("id, current_value")
+        .eq("site_id", siteId)
+        .eq("element_id", el.id)
+        .maybeSingle();
+
+      if (existing) {
+        // Ya existe - solo actualizar metadata, NO tocar current_value
+        await supabase
+          .from("elements")
+          .update({
+            type: el.type,
+            name: el.name,
+            xpath: el.xpath,
+            selector: el.selector,
+            context: el.context,
+            metadata: {
+              tag: el.tag,
+              classes: el.classes,
+              href: el.href,
+              alt: el.alt,
+            }
+          })
+          .eq("id", existing.id);
+      } else {
+        // No existe - crear nuevo
+        await supabase
+          .from("elements")
+          .insert({
+            site_id: siteId,
+            element_id: el.id,
+            type: el.type,
+            name: el.name,
+            xpath: el.xpath,
+            selector: el.selector,
+            context: el.context,
+            original_value: el.currentValue,
+            current_value: el.currentValue,
+            metadata: {
+              tag: el.tag,
+              classes: el.classes,
+              href: el.href,
+              alt: el.alt,
+            }
+          });
       }
     }
 
@@ -451,7 +470,7 @@
   const loadSavedValues = async (siteId) => {
     const { data, error } = await supabase
       .from("elements")
-      .select("element_id, current_value, type, metadata")
+      .select("element_id, current_value, original_value, type, metadata, selector")
       .eq("site_id", siteId);
 
     if (error) {
@@ -461,13 +480,18 @@
 
     const values = {};
     (data || []).forEach(el => {
-      values[el.element_id] = {
-        value: el.current_value,
-        type: el.type,
-        metadata: el.metadata
-      };
+      // Solo incluir si current_value es diferente de original_value (fue editado)
+      if (el.current_value !== el.original_value && el.current_value !== null) {
+        values[el.element_id] = {
+          value: el.current_value,
+          type: el.type,
+          metadata: el.metadata,
+          selector: el.selector
+        };
+      }
     });
 
+    log(`Encontrados ${Object.keys(values).length} elementos editados para hidratar`);
     return values;
   };
 
@@ -509,23 +533,47 @@
 
   const hydrateAll = (savedValues) => {
     let hydrated = 0;
+    let failed = 0;
 
     Object.entries(savedValues).forEach(([elementId, data]) => {
-      // Buscar por ID, data-mineiro-id, o selector
-      let el = document.getElementById(elementId) ||
-               document.querySelector(`[data-mineiro-id="${elementId}"]`);
+      // Buscar por múltiples métodos
+      let el = null;
       
+      // 1. Por ID nativo
+      el = document.getElementById(elementId);
+      
+      // 2. Por data-mineiro-id
+      if (!el) {
+        el = document.querySelector(`[data-mineiro-id="${elementId}"]`);
+      }
+      
+      // 3. Por selector guardado
+      if (!el && data.selector) {
+        try {
+          el = document.querySelector(data.selector);
+        } catch (e) {
+          // Selector inválido
+        }
+      }
+      
+      // 4. Por selector en metadata
       if (!el && data.metadata?.selector) {
-        el = document.querySelector(data.metadata.selector);
+        try {
+          el = document.querySelector(data.metadata.selector);
+        } catch (e) {
+          // Selector inválido
+        }
       }
 
       if (el) {
         hydrateElement(el, data.value, data.type, data.metadata);
         hydrated++;
+      } else {
+        failed++;
       }
     });
 
-    log(`Hidratados ${hydrated} elementos`);
+    log(`Hidratados ${hydrated} elementos, ${failed} no encontrados`);
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -946,22 +994,25 @@
       const siteId = getSiteId();
       log(`Site ID: ${siteId}`);
 
-      // Escanear página
+      // 1. PRIMERO cargar valores guardados (antes de escanear)
+      const savedValues = await loadSavedValues(siteId);
+      
+      // 2. Escanear página (asigna data-mineiro-id a elementos)
       const elements = scanPage();
 
-      // Guardar mapa en Supabase (en background)
-      saveSiteMap(siteId, elements).catch(e => warn("Error saving map:", e));
-
-      // Cargar valores guardados y aplicarlos
-      const savedValues = await loadSavedValues(siteId);
+      // 3. Hidratar con valores guardados
       if (Object.keys(savedValues).length > 0) {
         hydrateAll(savedValues);
+        log(`Aplicados ${Object.keys(savedValues).length} cambios guardados`);
       }
 
-      // Suscribirse a cambios en tiempo real
+      // 4. Guardar mapa en Supabase (en background, SIN sobrescribir current_value)
+      saveSiteMap(siteId, elements).catch(e => warn("Error saving map:", e));
+
+      // 5. Suscribirse a cambios en tiempo real
       subscribeToChanges(siteId);
 
-      // Si hay ?mineiro-admin en la URL, activar modo admin
+      // 6. Si hay ?mineiro-admin en la URL, activar modo admin
       if (window.location.search.includes("mineiro-admin") ||
           window.location.hash.includes("mineiro-admin")) {
         enableAdminMode();
@@ -971,6 +1022,7 @@
 
     } catch (err) {
       warn("Error de inicialización:", err);
+      console.error(err);
     }
   };
 
