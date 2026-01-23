@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "@/utils/supabase/client";
+import ProductEditor from "./ProductEditor";
 
 export default function DashboardClient({
   userId,
@@ -16,18 +17,12 @@ export default function DashboardClient({
   const [tiendaStatus, setTiendaStatus] = useState("");
 
   const [productos, setProductos] = useState(initialProductos ?? []);
-  const [productoNombre, setProductoNombre] = useState("");
-  const [productoPrecio, setProductoPrecio] = useState("");
-  const [productoCategoria, setProductoCategoria] = useState("");
   const [productosError, setProductosError] = useState("");
-  const [productosLoading, setProductosLoading] = useState(false);
   const [uploadingId, setUploadingId] = useState(null);
 
-  const [editingId, setEditingId] = useState(null);
-  const [editingNombre, setEditingNombre] = useState("");
-  const [editingPrecio, setEditingPrecio] = useState("");
-  const [editingCategoria, setEditingCategoria] = useState("");
-  const [editingVisible, setEditingVisible] = useState(true);
+  // Modal editor state
+  const [editorProduct, setEditorProduct] = useState(null);
+  const [showEditor, setShowEditor] = useState(false);
 
   useEffect(() => {
     setProductos(initialProductos ?? []);
@@ -78,6 +73,33 @@ export default function DashboardClient({
 
   const totalProductos = useMemo(() => productos.length, [productos]);
 
+  // Get unique categories for the editor
+  const categorias = useMemo(() => {
+    const cats = [...new Set(productos.map((p) => p.categoria).filter(Boolean))];
+    return cats.sort();
+  }, [productos]);
+
+  // Editor handlers
+  const openNewProduct = () => {
+    setEditorProduct(null);
+    setShowEditor(true);
+  };
+
+  const openEditProduct = (producto) => {
+    setEditorProduct(producto);
+    setShowEditor(true);
+  };
+
+  const closeEditor = () => {
+    setShowEditor(false);
+    setEditorProduct(null);
+  };
+
+  const handleEditorSave = (savedProduct) => {
+    closeEditor();
+    // The realtime subscription will update the list
+  };
+
   const handleSaveTienda = async (event) => {
     event.preventDefault();
     setTiendaStatus("Guardando...");
@@ -104,101 +126,6 @@ export default function DashboardClient({
     }
 
     setTiendaStatus("Guardado correctamente.");
-  };
-
-  const handleAddProducto = async (event) => {
-    event.preventDefault();
-    setProductosError("");
-    setProductosLoading(true);
-
-    if (!supabase) {
-      setProductosError(
-        "Configura las variables de Supabase antes de guardar.",
-      );
-      setProductosLoading(false);
-      return;
-    }
-
-    const precio = Number.parseFloat(productoPrecio);
-    if (!productoNombre || Number.isNaN(precio) || !productoCategoria) {
-      setProductosError("Completa nombre, precio y categoría.");
-      setProductosLoading(false);
-      return;
-    }
-
-    const { error } = await supabase.from("productos").insert({
-      user_id: userId,
-      nombre: productoNombre,
-      precio,
-      categoria: productoCategoria,
-      visible: true,
-    });
-
-    if (error) {
-      setProductosError("No se pudo guardar el producto.");
-      setProductosLoading(false);
-      return;
-    }
-
-    setProductoNombre("");
-    setProductoPrecio("");
-    setProductoCategoria("");
-    setProductosLoading(false);
-  };
-
-  const startEditing = (producto) => {
-    setEditingId(producto.id);
-    setEditingNombre(producto.nombre ?? "");
-    setEditingPrecio(
-      producto.precio !== null && producto.precio !== undefined
-        ? String(producto.precio)
-        : "",
-    );
-    setEditingCategoria(producto.categoria ?? "");
-    setEditingVisible(!!producto.visible);
-  };
-
-  const cancelEditing = () => {
-    setEditingId(null);
-    setEditingNombre("");
-    setEditingPrecio("");
-    setEditingCategoria("");
-    setEditingVisible(true);
-  };
-
-  const handleSaveEdit = async (productoId) => {
-    setProductosError("");
-    const precio = Number.parseFloat(editingPrecio);
-
-    if (!supabase) {
-      setProductosError(
-        "Configura las variables de Supabase antes de guardar.",
-      );
-      return;
-    }
-
-    if (!editingNombre || Number.isNaN(precio) || !editingCategoria) {
-      setProductosError("Completa nombre, precio y categoría.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("productos")
-      .update({
-        nombre: editingNombre,
-        precio,
-        categoria: editingCategoria,
-        visible: editingVisible,
-      })
-      .eq("id", productoId)
-      .eq("user_id", userId);
-
-    if (error) {
-      setProductosError("No se pudo actualizar el producto.");
-      return;
-    }
-
-    cancelEditing();
   };
 
   const handleToggleVisible = async (producto) => {
@@ -228,6 +155,8 @@ export default function DashboardClient({
       return;
     }
 
+    if (!confirm("¿Eliminar este producto?")) return;
+
     const { error } = await supabase
       .from("productos")
       .delete()
@@ -237,64 +166,6 @@ export default function DashboardClient({
     if (error) {
       setProductosError("No se pudo eliminar el producto.");
     }
-  };
-
-  const handleUploadImage = async (productoId, file) => {
-    if (!file) return;
-    setProductosError("");
-    setUploadingId(productoId);
-
-    if (!supabase) {
-      setProductosError(
-        "Configura las variables de Supabase antes de subir.",
-      );
-      setUploadingId(null);
-      return;
-    }
-
-    const fileExt = file.name.split(".").pop();
-    const safeName = file.name
-      .replace(/\s+/g, "-")
-      .replace(/[^a-zA-Z0-9.-]/g, "");
-    const filePath = `${userId}/${productoId}/${Date.now()}-${safeName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("fotos-menu")
-      .upload(filePath, file, {
-        cacheControl: "3600",
-        upsert: true,
-        contentType: file.type || "image/" + fileExt,
-      });
-
-    if (uploadError) {
-      setProductosError("No se pudo subir la imagen.");
-      setUploadingId(null);
-      return;
-    }
-
-    const { data: publicData } = supabase.storage
-      .from("fotos-menu")
-      .getPublicUrl(filePath);
-
-    const publicUrl = publicData?.publicUrl;
-
-    if (!publicUrl) {
-      setProductosError("No se pudo obtener la URL pública.");
-      setUploadingId(null);
-      return;
-    }
-
-    const { error: updateError } = await supabase
-      .from("productos")
-      .update({ imagen_url: publicUrl })
-      .eq("id", productoId)
-      .eq("user_id", userId);
-
-    if (updateError) {
-      setProductosError("No se pudo guardar la imagen en el producto.");
-    }
-
-    setUploadingId(null);
   };
 
   return (
@@ -367,49 +238,26 @@ export default function DashboardClient({
         <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-xl font-semibold text-white">Productos</h2>
-              <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                {totalProductos} productos
-              </span>
+              <div>
+                <h2 className="text-xl font-semibold text-white">Productos</h2>
+                <p className="text-sm text-slate-300 mt-1">
+                  Crea, edita o oculta productos para tu catálogo.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                  {totalProductos} productos
+                </span>
+                <button
+                  type="button"
+                  onClick={openNewProduct}
+                  className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-amber-500/20 transition hover:brightness-110"
+                >
+                  + Nuevo Producto
+                </button>
+              </div>
             </div>
-            <p className="text-sm text-slate-300">
-              Crea, edita o oculta productos para tu catálogo.
-            </p>
           </div>
-
-          <form
-            className="mt-6 grid gap-4 md:grid-cols-[1.3fr_0.6fr_0.9fr_auto]"
-            onSubmit={handleAddProducto}
-          >
-            <input
-              value={productoNombre}
-              onChange={(event) => setProductoNombre(event.target.value)}
-              placeholder="Nombre del producto"
-              className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
-            />
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={productoPrecio}
-              onChange={(event) => setProductoPrecio(event.target.value)}
-              placeholder="Precio"
-              className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
-            />
-            <input
-              value={productoCategoria}
-              onChange={(event) => setProductoCategoria(event.target.value)}
-              placeholder="Categoría"
-              className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
-            />
-            <button
-              type="submit"
-              disabled={productosLoading}
-              className="rounded-xl bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {productosLoading ? "Guardando..." : "Añadir"}
-            </button>
-          </form>
 
           {productosError ? (
             <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -435,86 +283,55 @@ export default function DashboardClient({
                       className="px-5 py-6 text-center text-slate-400"
                       colSpan={5}
                     >
-                      No hay productos aún. Crea el primero arriba.
+                      No hay productos aún. Crea el primero con el botón de arriba.
                     </td>
                   </tr>
                 ) : (
                   productos.map((producto) => {
-                    const isEditing = editingId === producto.id;
+                    const hasVariants = producto.configuracion?.variantes?.length > 0;
+                    const displayPrice = hasVariants
+                      ? `Desde $${producto.configuracion.variantes[0]?.precio?.toLocaleString("es-CL") || 0}`
+                      : `$${producto.precio?.toLocaleString("es-CL") || 0}`;
 
                     return (
-                      <tr key={producto.id} className="text-slate-200">
+                      <tr key={producto.id} className="text-slate-200 hover:bg-slate-900/40 transition-colors">
                         <td className="px-5 py-4">
-                          {isEditing ? (
-                            <input
-                              value={editingNombre}
-                              onChange={(event) =>
-                                setEditingNombre(event.target.value)
-                              }
-                              className="w-full rounded-lg border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/70"
-                            />
-                          ) : (
-                            <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 overflow-hidden rounded-lg border border-slate-800/70 bg-slate-900/60">
-                                {producto.imagen_url ? (
-                                  <img
-                                    src={producto.imagen_url}
-                                    alt={producto.nombre}
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-500">
-                                    Sin foto
-                                  </div>
-                                )}
-                              </div>
-                              <span>{producto.nombre}</span>
+                          <div className="flex items-center gap-3">
+                            <div className="h-12 w-12 overflow-hidden rounded-lg border border-slate-800/70 bg-slate-900/60 flex-shrink-0">
+                              {producto.imagen_url ? (
+                                <img
+                                  src={producto.imagen_url}
+                                  alt={producto.nombre}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-500">
+                                  Sin foto
+                                </div>
+                              )}
                             </div>
-                          )}
+                            <div>
+                              <span className="font-medium">{producto.nombre}</span>
+                              {hasVariants && (
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                  {producto.configuracion.variantes.length} variantes
+                                </p>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         <td className="px-5 py-4">
-                          {isEditing ? (
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={editingPrecio}
-                              onChange={(event) =>
-                                setEditingPrecio(event.target.value)
-                              }
-                              className="w-full rounded-lg border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/70"
-                            />
-                          ) : (
-                            <span>${producto.precio}</span>
-                          )}
+                          <span className={hasVariants ? "text-amber-400" : ""}>
+                            {displayPrice}
+                          </span>
                         </td>
                         <td className="px-5 py-4">
-                          {isEditing ? (
-                            <input
-                              value={editingCategoria}
-                              onChange={(event) =>
-                                setEditingCategoria(event.target.value)
-                              }
-                              className="w-full rounded-lg border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/70"
-                            />
-                          ) : (
-                            <span>{producto.categoria}</span>
-                          )}
+                          <span className="rounded-full bg-slate-700/40 px-3 py-1 text-xs">
+                            {producto.categoria || "Sin categoría"}
+                          </span>
                         </td>
                         <td className="px-5 py-4">
-                          {isEditing ? (
-                            <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-                              <input
-                                type="checkbox"
-                                checked={editingVisible}
-                                onChange={(event) =>
-                                  setEditingVisible(event.target.checked)
-                                }
-                                className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-400"
-                              />
-                              Visible
-                            </label>
-                          ) : producto.visible ? (
+                          {producto.visible ? (
                             <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">
                               Visible
                             </span>
@@ -526,65 +343,27 @@ export default function DashboardClient({
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex flex-wrap justify-end gap-2">
-                            {isEditing ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleSaveEdit(producto.id)}
-                                  className="rounded-lg bg-cyan-500/20 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
-                                >
-                                  Guardar
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={cancelEditing}
-                                  className="rounded-lg border border-slate-700/60 px-3 py-2 text-xs text-slate-300 transition hover:bg-slate-800/50"
-                                >
-                                  Cancelar
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => startEditing(producto)}
-                                  className="rounded-lg border border-slate-700/60 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800/60"
-                                >
-                                  Editar
-                                </button>
-                                <label className="rounded-lg border border-slate-700/60 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800/60">
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    onChange={(event) =>
-                                      handleUploadImage(
-                                        producto.id,
-                                        event.target.files?.[0],
-                                      )
-                                    }
-                                    disabled={uploadingId === producto.id}
-                                  />
-                                  {uploadingId === producto.id
-                                    ? "Subiendo..."
-                                    : "Subir foto"}
-                                </label>
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleVisible(producto)}
-                                  className="rounded-lg border border-slate-700/60 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800/60"
-                                >
-                                  {producto.visible ? "Ocultar" : "Mostrar"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDelete(producto.id)}
-                                  className="rounded-lg border border-rose-500/40 px-3 py-2 text-xs text-rose-200 transition hover:bg-rose-500/10"
-                                >
-                                  Eliminar
-                                </button>
-                              </>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => openEditProduct(producto)}
+                              className="rounded-lg bg-cyan-500/20 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleVisible(producto)}
+                              className="rounded-lg border border-slate-700/60 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800/60"
+                            >
+                              {producto.visible ? "Ocultar" : "Mostrar"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(producto.id)}
+                              className="rounded-lg border border-rose-500/40 px-3 py-2 text-xs text-rose-200 transition hover:bg-rose-500/10"
+                            >
+                              Eliminar
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -596,6 +375,18 @@ export default function DashboardClient({
           </div>
         </section>
       </div>
+
+      {/* Product Editor Modal */}
+      {showEditor && (
+        <ProductEditor
+          product={editorProduct}
+          userId={userId}
+          tiendaId={initialTienda?.id}
+          categorias={categorias}
+          onSave={handleEditorSave}
+          onCancel={closeEditor}
+        />
+      )}
     </div>
   );
 }
