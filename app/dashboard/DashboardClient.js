@@ -189,9 +189,13 @@ export default function DashboardClient({
     if (!supabase) return;
     setCreatingTienda(true);
 
+    // Generate UUID client-side
+    const newId = crypto.randomUUID();
+
     const { data, error } = await supabase
       .from("tiendas")
       .insert({
+        id: newId,
         user_id: userId,
         nombre_negocio: "Nueva Tienda",
         url_web: "",
@@ -262,12 +266,16 @@ export default function DashboardClient({
       .replace(/[^a-z0-9-]/g, "")
       .slice(0, 30);
 
+    // Generate UUID client-side
+    const newId = crypto.randomUUID();
+
     const { data, error } = await supabase
       .from("tiendas")
       .insert({
+        id: newId,
         user_id: userId,
         nombre_negocio: onboardingNombre,
-        url_web: onboardingUrl,
+        url_web: onboardingUrl || "",
         slug: slug || `tienda-${Date.now()}`,
         estado_pago: false,
         plan: "trial",
@@ -337,14 +345,14 @@ export default function DashboardClient({
                     URL de tu página web (opcional)
                   </label>
                   <input
-                    type="url"
+                    type="text"
                     value={onboardingUrl}
                     onChange={(e) => setOnboardingUrl(e.target.value)}
-                    placeholder="https://www.minegocio.com"
+                    placeholder="https://mi-negocio.vercel.app o https://minegocio.cl"
                     className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
                   />
                   <p className="text-xs text-slate-400">
-                    La URL donde instalarás el menú de Mineiro
+                    Acepta cualquier URL: Vercel, .cl, .com, etc. Puedes cambiarla después.
                   </p>
                 </div>
 
