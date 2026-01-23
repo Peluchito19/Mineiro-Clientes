@@ -4,18 +4,31 @@ import { createServerClient } from "@supabase/ssr";
 import PricingClient from "./PricingClient";
 
 export default async function PricingPage() {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        get: (name) => cookieStore.get(name)?.value,
-        set: () => {},
-        remove: () => {},
-      },
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="text-center text-slate-300">
+          <h1 className="text-xl font-semibold text-white mb-2">
+            Configuración incompleta
+          </h1>
+          <p>Las variables de entorno de Supabase no están configuradas.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const cookieStore = await cookies();
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      get: (name) => cookieStore.get(name)?.value,
+      set: () => {},
+      remove: () => {},
     },
-  );
+  });
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -24,5 +37,12 @@ export default async function PricingPage() {
     redirect("/login");
   }
 
-  return <PricingClient />;
+  // Get user's tienda to check current plan
+  const { data: tienda } = await supabase
+    .from("tiendas")
+    .select("id, plan, estado_pago")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  return <PricingClient userId={user.id} tienda={tienda} />;
 }
