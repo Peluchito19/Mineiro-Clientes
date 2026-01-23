@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies, headers } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { createServerClient } from "@supabase/ssr";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
 const PRICING = {
@@ -9,7 +9,30 @@ const PRICING = {
 };
 
 export async function POST(request) {
-  const supabase = createRouteHandlerClient({ cookies });
+  const cookieStore = cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    {
+      cookies: {
+        get: (name) => cookieStore.get(name)?.value,
+        set: (name, value, options) => {
+          try {
+            cookieStore.set({ name, value, ...options });
+          } catch {
+            // Ignore if cookies cannot be set in this context.
+          }
+        },
+        remove: (name, options) => {
+          try {
+            cookieStore.set({ name, value: "", ...options, maxAge: 0 });
+          } catch {
+            // Ignore if cookies cannot be set in this context.
+          }
+        },
+      },
+    },
+  );
   const {
     data: { user },
   } = await supabase.auth.getUser();
