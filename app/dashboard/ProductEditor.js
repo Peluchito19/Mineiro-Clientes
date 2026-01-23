@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import * as Switch from "@radix-ui/react-switch";
 import * as Tabs from "@radix-ui/react-tabs";
@@ -17,7 +17,7 @@ import {
   Save,
   Loader2,
 } from "lucide-react";
-import { supabase } from "@/utils/supabase/client";
+import { getSupabaseClient } from "@/utils/supabase/client";
 
 /* ─────────────────────────────────────────────────────────────────────────
    UTILITIES
@@ -296,6 +296,12 @@ export default function ProductEditor({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      alert("Error: Supabase no está configurado");
+      return;
+    }
+
     setUploading(true);
     try {
       const fileExt = file.name.split(".").pop();
@@ -322,6 +328,12 @@ export default function ProductEditor({
 
   // Form submit
   const onSubmit = async (data) => {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      alert("Error: Supabase no está configurado");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
