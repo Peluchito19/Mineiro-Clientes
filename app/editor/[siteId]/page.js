@@ -17,25 +17,28 @@ export default async function EditorPage({ params }) {
     redirect("/login");
   }
 
-  // Cargar datos del sitio
+  // Cargar datos del sitio (puede no existir aún)
   const { data: site } = await supabase
     .from("sites")
     .select("*")
     .eq("site_id", siteId)
-    .single();
+    .maybeSingle();
 
   // Cargar elementos del sitio
-  const { data: elements } = await supabase
+  const { data: elements, error: elementsError } = await supabase
     .from("elements")
     .select("*")
     .eq("site_id", siteId)
     .order("context", { ascending: true });
 
+  // Si hay error de tabla no existe, devolver array vacío
+  const safeElements = elementsError ? [] : (elements || []);
+
   return (
     <EditorClient
       siteId={siteId}
-      site={site}
-      initialElements={elements || []}
+      site={site || { site_id: siteId, url: null }}
+      initialElements={safeElements}
       userId={user.id}
     />
   );

@@ -517,12 +517,26 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
           {/* Elements List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {Object.keys(groupedElements).length === 0 ? (
-              <div className="text-center py-12">
-                <Search size={40} className="mx-auto text-slate-600 mb-3" />
-                <p className="text-slate-400">No se encontraron elementos</p>
-                <p className="text-sm text-slate-500 mt-1">
-                  {searchQuery ? "Intenta con otra búsqueda" : "El sitio aún no ha sido escaneado"}
+              <div className="text-center py-8">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-500/10 flex items-center justify-center">
+                  <span className="text-3xl">🔍</span>
+                </div>
+                <p className="text-slate-300 font-medium mb-2">
+                  {searchQuery ? "Sin resultados" : "Esperando elementos..."}
                 </p>
+                <p className="text-sm text-slate-500 mb-4 max-w-xs mx-auto">
+                  {searchQuery 
+                    ? "Intenta con otra búsqueda" 
+                    : "Asegúrate de que el script de Mineiro esté instalado en la web del cliente."}
+                </p>
+                {!searchQuery && (
+                  <div className="bg-slate-800/50 rounded-xl p-4 text-left max-w-sm mx-auto">
+                    <p className="text-xs text-slate-400 mb-2">El cliente debe pegar esto antes de &lt;/body&gt;:</p>
+                    <code className="text-xs text-amber-300 break-all">
+                      &lt;script src=&quot;{typeof window !== 'undefined' ? window.location.origin : ''}/mineiro.js&quot; data-mineiro-site=&quot;{siteId}&quot;&gt;&lt;/script&gt;
+                    </code>
+                  </div>
+                )}
               </div>
             ) : (
               Object.entries(groupedElements).map(([context, contextElements]) => (

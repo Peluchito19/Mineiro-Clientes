@@ -718,8 +718,26 @@
   };
 
   const handleAdminClick = (e) => {
+    // Ignorar clicks dentro del popup de edición
+    if (e.target.closest(".mineiro-edit-popup")) {
+      return;
+    }
+
+    // Ignorar clicks en la barra de admin
+    if (e.target.closest(".mineiro-admin-bar")) {
+      return;
+    }
+
     const el = e.target.closest("[data-mineiro-id]");
-    if (!el) return;
+    if (!el) {
+      // Click fuera de elementos editables - cerrar popup
+      document.querySelector(".mineiro-edit-popup")?.remove();
+      if (selectedElement) {
+        selectedElement.classList.remove("mineiro-selected");
+        selectedElement = null;
+      }
+      return;
+    }
 
     e.preventDefault();
     e.stopPropagation();
@@ -743,7 +761,7 @@
     const type = detectElementType(el);
     const currentValue = type === ElementTypes.IMAGE 
       ? (el.src || el.style.backgroundImage.replace(/url\(['"]?(.+?)['"]?\)/i, "$1"))
-      : el.textContent;
+      : el.textContent?.trim();
 
     const rect = el.getBoundingClientRect();
     const popup = document.createElement("div");
@@ -761,34 +779,70 @@
       top = rect.top - 210 + window.scrollY;
     }
     
-    popup.style.top = `${top}px`;
-    popup.style.left = `${left}px`;
+    popup.style.top = `${Math.max(60, top)}px`;
+    popup.style.left = `${Math.max(10, left)}px`;
 
-    const inputType = type === ElementTypes.PARAGRAPH ? "textarea" : "input";
-    const inputTypeAttr = type === ElementTypes.PRICE ? 'type="number"' : 'type="text"';
+    const isTextarea = type === ElementTypes.PARAGRAPH || (currentValue && currentValue.length > 50);
+    const isPrice = type === ElementTypes.PRICE;
+    const escapedValue = (currentValue || "").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
     popup.innerHTML = `
       <label>Editar ${type === ElementTypes.IMAGE ? "URL de imagen" : "contenido"}</label>
-      <${inputType} ${inputType === "input" ? inputTypeAttr : ""} 
-        id="mineiro-edit-input" 
-        value="${currentValue?.replace(/"/g, "&quot;") || ""}"
-        ${inputType === "textarea" ? `>${currentValue || ""}</textarea>` : "/>"}
+      ${isTextarea 
+        ? `<textarea id="mineiro-edit-input">${currentValue || ""}</textarea>`
+        : `<input ${isPrice ? 'type="number"' : 'type="text"'} id="mineiro-edit-input" value="${escapedValue}" />`
+      }
       <div class="mineiro-edit-actions">
-        <button class="mineiro-admin-btn mineiro-admin-btn-secondary" onclick="document.querySelector('.mineiro-edit-popup')?.remove()">
+        <button type="button" class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-cancel-btn">
           Cancelar
         </button>
-        <button class="mineiro-admin-btn mineiro-admin-btn-primary" onclick="window.MineiroAdmin.saveElement('${elementId}', '${type}')">
+        <button type="button" class="mineiro-admin-btn mineiro-admin-btn-primary" id="mineiro-save-btn">
           💾 Guardar
         </button>
       </div>
     `;
 
     document.body.appendChild(popup);
-    document.getElementById("mineiro-edit-input").focus();
+    
+    // Event listeners (no usar onclick inline para evitar problemas)
+    const input = document.getElementById("mineiro-edit-input");
+    const cancelBtn = document.getElementById("mineiro-cancel-btn");
+    const saveBtn = document.getElementById("mineiro-save-btn");
+    
+    // Prevenir que el click en el input cierre el popup
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("mousedown", (e) => e.stopPropagation());
+    
+    cancelBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      popup.remove();
+      if (selectedElement) {
+        selectedElement.classList.remove("mineiro-selected");
+        selectedElement = null;
+      }
+    });
+    
+    saveBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      saveElement(elementId, type);
+    });
+    
+    // Enter para guardar (excepto en textarea)
+    if (!isTextarea) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          saveElement(elementId, type);
+        }
+      });
+    }
+    
+    input.focus();
   };
 
   const saveElement = async (elementId, type) => {
     const input = document.getElementById("mineiro-edit-input");
+    const saveBtn = document.getElementById("mineiro-save-btn");
     if (!input) return;
 
     let value = input.value;
@@ -798,27 +852,70 @@
 
     const siteId = getSiteId();
     
-    // Guardar en Supabase
-    const { error } = await supabase
-      .from("elements")
-      .update({ current_value: value })
-      .eq("site_id", siteId)
-      .eq("element_id", elementId);
+    // Mostrar estado de guardado
+    if (saveBtn) {
+      saveBtn.textContent = "⏳ Guardando...";
+      saveBtn.disabled = true;
+    }
+    
+    try {
+      // Primero intentar UPDATE
+      const { data: updateData, error: updateError } = await supabase
+        .from("elements")
+        .update({ current_value: value })
+        .eq("site_id", siteId)
+        .eq("element_id", elementId)
+        .select();
 
-    if (error) {
+      // Si no se actualizó ninguna fila, hacer INSERT
+      if (!updateError && (!updateData || updateData.length === 0)) {
+        const { error: insertError } = await supabase
+          .from("elements")
+          .upsert({
+            site_id: siteId,
+            element_id: elementId,
+            type: type,
+            current_value: value,
+            original_value: value,
+            name: selectedElement?.dataset.mineiroName || `Elemento ${elementId}`,
+          }, { onConflict: "site_id,element_id" });
+        
+        if (insertError) {
+          throw insertError;
+        }
+      } else if (updateError) {
+        throw updateError;
+      }
+
+      // Aplicar localmente
+      if (selectedElement) {
+        hydrateElement(selectedElement, value, type, {});
+        selectedElement.classList.remove("mineiro-selected");
+      }
+      
+      selectedElement = null;
+
+      // Cerrar popup con feedback
+      const popup = document.querySelector(".mineiro-edit-popup");
+      if (popup) {
+        popup.innerHTML = `<div style="text-align:center;color:#4ade80;padding:20px">✓ Guardado</div>`;
+        setTimeout(() => popup.remove(), 800);
+      }
+      
+      log(`Guardado: ${elementId} = ${value}`);
+      
+    } catch (error) {
       warn("Error saving:", error.message);
-      alert("Error al guardar");
-      return;
+      if (saveBtn) {
+        saveBtn.textContent = "❌ Error";
+        saveBtn.style.background = "#ef4444";
+        setTimeout(() => {
+          saveBtn.textContent = "💾 Guardar";
+          saveBtn.style.background = "";
+          saveBtn.disabled = false;
+        }, 2000);
+      }
     }
-
-    // Aplicar localmente
-    if (selectedElement) {
-      hydrateElement(selectedElement, value, type, {});
-    }
-
-    // Cerrar popup
-    document.querySelector(".mineiro-edit-popup")?.remove();
-    log(`Guardado: ${elementId}`);
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
