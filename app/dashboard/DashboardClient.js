@@ -222,6 +222,39 @@ export default function DashboardClient({
     setProductos([]);
   };
 
+  const handleDeleteTienda = async (tiendaId) => {
+    if (!supabase) return;
+    if (!confirm("¿Eliminar esta tienda y todos sus productos? Esta acción no se puede deshacer.")) return;
+
+    // First delete all products of this store
+    await supabase
+      .from("productos")
+      .delete()
+      .eq("tienda_id", tiendaId);
+
+    // Then delete the store
+    const { error } = await supabase
+      .from("tiendas")
+      .delete()
+      .eq("id", tiendaId);
+
+    if (error) {
+      alert("No se pudo eliminar la tienda: " + error.message);
+      return;
+    }
+
+    // Update local state
+    const remaining = tiendas.filter((t) => t.id !== tiendaId);
+    setTiendas(remaining);
+    
+    if (selectedTienda?.id === tiendaId) {
+      setSelectedTienda(remaining[0] || null);
+      if (remaining.length === 0) {
+        setShowOnboarding(true);
+      }
+    }
+  };
+
   const handleToggleVisible = async (producto) => {
     if (!supabase) return;
 
@@ -439,22 +472,36 @@ export default function DashboardClient({
           ) : (
             <div className="flex flex-wrap gap-3">
               {tiendas.map((tienda) => (
-                <button
+                <div
                   key={tienda.id}
-                  onClick={() => handleSelectTienda(tienda)}
-                  className={`rounded-xl px-4 py-3 text-sm font-medium transition ${
+                  className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition ${
                     selectedTienda?.id === tienda.id
                       ? "bg-cyan-500/20 border-2 border-cyan-500 text-cyan-100"
                       : "bg-slate-800/50 border border-slate-700 text-slate-300 hover:bg-slate-800"
                   }`}
                 >
-                  <span>{tienda.nombre_negocio || "Sin nombre"}</span>
-                  {tienda.estado_pago ? (
-                    <span className="ml-2 text-xs text-emerald-400">✓</span>
-                  ) : (
-                    <span className="ml-2 text-xs text-amber-400">Trial</span>
-                  )}
-                </button>
+                  <button
+                    onClick={() => handleSelectTienda(tienda)}
+                    className="flex items-center gap-2"
+                  >
+                    <span>{tienda.nombre_negocio || "Sin nombre"}</span>
+                    {tienda.estado_pago ? (
+                      <span className="text-xs text-emerald-400">✓</span>
+                    ) : (
+                      <span className="text-xs text-amber-400">Trial</span>
+                    )}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteTienda(tienda.id);
+                    }}
+                    className="ml-2 text-slate-500 hover:text-rose-400 transition"
+                    title="Eliminar tienda"
+                  >
+                    ✕
+                  </button>
+                </div>
               ))}
             </div>
           )}
