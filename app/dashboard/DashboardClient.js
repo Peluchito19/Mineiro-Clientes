@@ -573,6 +573,60 @@ export default function DashboardClient({
           </section>
         )}
 
+        {/* Script de Conexión */}
+        {selectedTienda && tiendaSlug && (
+          <section className="rounded-2xl border-2 border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-orange-500/5 p-8 shadow-xl">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">⚡</span>
+                  <h2 className="text-xl font-semibold text-white">
+                    Conectar con la Web del Cliente
+                  </h2>
+                </div>
+                <p className="text-sm text-slate-300 mb-4">
+                  Pega este script en la web <strong>{tiendaUrl || "del cliente"}</strong> antes de cerrar el <code className="bg-slate-800 px-1.5 py-0.5 rounded text-amber-300">&lt;/body&gt;</code>
+                </p>
+                <div className="bg-slate-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
+                  <code className="text-slate-300">
+                    <span className="text-slate-500">{"<!-- Mineiro Editor -->"}</span>
+                    {"\n"}
+                    <span className="text-violet-400">{"<script "}</span>
+                    <span className="text-cyan-300">src</span>
+                    <span className="text-white">{"="}</span>
+                    <span className="text-amber-300">{`"${typeof window !== 'undefined' ? window.location.origin : 'https://mineiro-clientes.vercel.app'}/mineiro.js"`}</span>
+                    {"\n"}
+                    {"  "}
+                    <span className="text-cyan-300">data-mineiro-site</span>
+                    <span className="text-white">{"="}</span>
+                    <span className="text-amber-300">{`"${tiendaSlug}"`}</span>
+                    <span className="text-violet-400">{">"}</span>
+                    <span className="text-violet-400">{"</script>"}</span>
+                  </code>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3">
+                <a
+                  href={`/editor/${tiendaSlug}`}
+                  className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-semibold shadow-lg shadow-cyan-500/20 hover:brightness-110 transition"
+                >
+                  🎨 Abrir Editor Visual
+                </a>
+                {tiendaUrl && (
+                  <a
+                    href={`${tiendaUrl}?mineiro-admin`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition"
+                  >
+                    🔧 Editar en la Web
+                  </a>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Tab Navigation */}
         {selectedTienda && (
           <div className="flex flex-wrap gap-2 border-b border-slate-800">
