@@ -1,65 +1,91 @@
-import Image from "next/image";
-
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="relative isolate overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),_transparent_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(124,58,237,0.2),_transparent_55%)]" />
+
+        <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col gap-16 px-6 py-16">
+          <header className="flex flex-col gap-6">
+            <div className="flex items-center gap-3 text-sm uppercase tracking-[0.3em] text-cyan-400/80">
+              Mineiro Client System
+            </div>
+            <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-white md:text-5xl">
+              Digitaliza tu carta y gestiona tu negocio con una plataforma
+              profesional.
+            </h1>
+            <p className="max-w-2xl text-base text-slate-300 md:text-lg">
+              Mineiro centraliza tus productos, publicaciones y pagos en un
+              panel seguro. Publica tu menú en minutos y controla todo desde un
+              dashboard moderno.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <a
+                href="/login"
+                className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-cyan-500 to-violet-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:brightness-110"
+              >
+                Acceder a mi Panel
+              </a>
+              <a
+                href="/pricing"
+                className="inline-flex items-center justify-center rounded-full border border-slate-700/60 px-6 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-900/70"
+              >
+                Ver planes
+              </a>
+            </div>
+          </header>
+
+          <section className="grid gap-6 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
+              <h2 className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                Beneficios
+              </h2>
+              <ul className="mt-6 space-y-4 text-sm text-slate-300">
+                <li className="flex items-start gap-3">
+                  <span className="mt-1 h-2 w-2 rounded-full bg-cyan-400" />
+                  Control total de productos, precios y categorías en tiempo
+                  real.
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="mt-1 h-2 w-2 rounded-full bg-violet-400" />
+                  Tu menú disponible en la web con imágenes y ordenadas por
+                  secciones.
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="mt-1 h-2 w-2 rounded-full bg-emerald-400" />
+                  Pago seguro y activación inmediata de tu servicio.
+                </li>
+              </ul>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
+              <h2 className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                Planes
+              </h2>
+              <div className="mt-6 grid gap-4">
+                <div className="rounded-xl border border-slate-800/60 bg-slate-950/70 p-5">
+                  <div className="text-lg font-semibold text-white">Mensual</div>
+                  <div className="text-2xl font-semibold text-cyan-400">
+                    $50.000
+                  </div>
+                  <p className="text-sm text-slate-400">
+                    Perfecto para negocios en crecimiento.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-800/60 bg-slate-950/70 p-5">
+                  <div className="text-lg font-semibold text-white">Anual</div>
+                  <div className="text-2xl font-semibold text-violet-400">
+                    $500.000
+                  </div>
+                  <p className="text-sm text-slate-400">
+                    Ahorra y asegura tu presencia digital.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
