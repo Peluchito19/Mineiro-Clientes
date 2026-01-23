@@ -81,7 +81,7 @@
     const { data, error } = await supabase
       .from("tiendas")
       .select("*")
-      .or(`slug.eq.${slug},url.ilike.%${slug}%`)
+      .or(`slug.eq.${slug},url_web.ilike.%${slug}%`)
       .limit(1)
       .maybeSingle();
     if (error) throw error;

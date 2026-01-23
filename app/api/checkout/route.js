@@ -9,30 +9,22 @@ const PRICING = {
 };
 
 export async function POST(request) {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        get: (name) => cookieStore.get(name)?.value,
-        set: (name, value, options) => {
-          try {
-            cookieStore.set({ name, value, ...options });
-          } catch {
-            // Ignore if cookies cannot be set in this context.
-          }
-        },
-        remove: (name, options) => {
-          try {
-            cookieStore.set({ name, value: "", ...options, maxAge: 0 });
-          } catch {
-            // Ignore if cookies cannot be set in this context.
-          }
-        },
-      },
+  const cookieStore = await cookies();
+  const headersList = await headers();
+  
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
+  }
+
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      get: (name) => cookieStore.get(name)?.value,
     },
-  );
+  });
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -43,14 +35,14 @@ export async function POST(request) {
 
   const { data: tienda } = await supabase
     .from("tiendas")
-    .select("id, nombre")
+    .select("id, nombre_negocio")
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (!tienda) {
     return NextResponse.json(
       { error: "No se encontró la tienda del usuario." },
-      { status: 404 },
+      { status: 404 }
     );
   }
 
@@ -59,12 +51,12 @@ export async function POST(request) {
   const selectedPlan = PRICING[plan];
 
   const origin =
-    headers().get("origin") ||
+    headersList.get("origin") ||
     process.env.NEXT_PUBLIC_SITE_URL ||
     "http://localhost:3000";
 
   const successUrl = `${origin}/api/checkout/success?tiendaId=${encodeURIComponent(
-    tienda.id,
+    tienda.id
   )}&status=approved`;
   const pendingUrl = `${origin}/pricing?status=pending`;
   const failureUrl = `${origin}/pricing?status=failure`;
@@ -73,37 +65,45 @@ export async function POST(request) {
   if (!accessToken) {
     return NextResponse.json(
       { error: "Falta MERCADOPAGO_ACCESS_TOKEN en el entorno." },
-      { status: 500 },
+      { status: 500 }
     );
   }
 
   const client = new MercadoPagoConfig({ accessToken });
   const preference = new Preference(client);
 
-  const { init_point, sandbox_init_point } = await preference.create({
-    body: {
-      items: [
-        {
-          title: selectedPlan.title,
-          quantity: 1,
-          unit_price: selectedPlan.unit_price,
-          currency_id: "CLP",
+  try {
+    const { init_point, sandbox_init_point } = await preference.create({
+      body: {
+        items: [
+          {
+            title: selectedPlan.title,
+            quantity: 1,
+            unit_price: selectedPlan.unit_price,
+            currency_id: "CLP",
+          },
+        ],
+        back_urls: {
+          success: successUrl,
+          pending: pendingUrl,
+          failure: failureUrl,
         },
-      ],
-      back_urls: {
-        success: successUrl,
-        pending: pendingUrl,
-        failure: failureUrl,
+        auto_return: "approved",
+        metadata: {
+          user_id: user.id,
+          tienda_id: tienda.id,
+          plan,
+        },
+        external_reference: `${tienda.id}`,
       },
-      auto_return: "approved",
-      metadata: {
-        user_id: user.id,
-        tienda_id: tienda.id,
-        plan,
-      },
-      external_reference: `${tienda.id}`,
-    },
-  });
+    });
 
-  return NextResponse.json({ init_point, sandbox_init_point });
+    return NextResponse.json({ init_point, sandbox_init_point });
+  } catch (err) {
+    console.error("MercadoPago error:", err);
+    return NextResponse.json(
+      { error: "Error creating payment preference" },
+      { status: 500 }
+    );
+  }
 }

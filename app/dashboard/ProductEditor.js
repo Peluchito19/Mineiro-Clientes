@@ -342,7 +342,7 @@ export default function ProductEditor({
         nombre: data.nombre,
         precio: useVariants ? (data.variantes[0]?.precio || 0) : parseInt(data.precio, 10),
         categoria: data.categoria,
-        imagen_url: data.imagen_url,
+        imagen_url: data.imagen_url || "",
         visible: data.visible,
         configuracion: useVariants
           ? { variantes: data.variantes.map((v) => ({ ...v, precio: parseInt(v.precio, 10) })) }
@@ -351,9 +351,11 @@ export default function ProductEditor({
 
       let result;
       if (isNew) {
+        // Generate UUID client-side for new products
+        const newId = crypto.randomUUID();
         const { data: newProduct, error } = await supabase
           .from("productos")
-          .insert(payload)
+          .insert({ id: newId, ...payload })
           .select()
           .single();
         if (error) throw error;

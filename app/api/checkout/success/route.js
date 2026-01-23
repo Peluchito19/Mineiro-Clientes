@@ -7,8 +7,9 @@ export async function GET(request) {
   const tiendaId = searchParams.get("tiendaId");
   const status = searchParams.get("status");
 
+  const headersList = await headers();
   const origin =
-    headers().get("origin") ||
+    headersList.get("origin") ||
     process.env.NEXT_PUBLIC_SITE_URL ||
     "http://localhost:3000";
 
