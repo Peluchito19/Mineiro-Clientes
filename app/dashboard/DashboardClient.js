@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/utils/supabase/client";
 import ProductEditor from "./ProductEditor";
+import SiteConfigEditor from "./SiteConfigEditor";
+import TestimoniosEditor from "./TestimoniosEditor";
 
 export default function DashboardClient({
   userId,
@@ -39,6 +41,9 @@ export default function DashboardClient({
   // Modal editor state
   const [editorProduct, setEditorProduct] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
+
+  // Tab navigation
+  const [activeTab, setActiveTab] = useState("productos");
 
   // Update form when selected tienda changes
   useEffect(() => {
@@ -568,8 +573,53 @@ export default function DashboardClient({
           </section>
         )}
 
-        {/* Products */}
+        {/* Tab Navigation */}
         {selectedTienda && (
+          <div className="flex flex-wrap gap-2 border-b border-slate-800">
+            <button
+              onClick={() => setActiveTab("productos")}
+              className={`px-5 py-3 text-sm font-medium transition-colors relative ${
+                activeTab === "productos"
+                  ? "text-cyan-400"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              📦 Productos
+              {activeTab === "productos" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-cyan-500 to-blue-500" />
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab("config")}
+              className={`px-5 py-3 text-sm font-medium transition-colors relative ${
+                activeTab === "config"
+                  ? "text-violet-400"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              ⚙️ Configuración del Sitio
+              {activeTab === "config" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-500 to-purple-500" />
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab("testimonios")}
+              className={`px-5 py-3 text-sm font-medium transition-colors relative ${
+                activeTab === "testimonios"
+                  ? "text-amber-400"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              💬 Testimonios
+              {activeTab === "testimonios" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-amber-500 to-orange-500" />
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Tab Content: Productos */}
+        {selectedTienda && activeTab === "productos" && (
           <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -607,6 +657,7 @@ export default function DashboardClient({
                     <th className="px-5 py-4">Producto</th>
                     <th className="px-5 py-4">Precio</th>
                     <th className="px-5 py-4">Categoría</th>
+                    <th className="px-5 py-4">DOM ID</th>
                     <th className="px-5 py-4">Estado</th>
                     <th className="px-5 py-4 text-right">Acciones</th>
                   </tr>
@@ -614,7 +665,7 @@ export default function DashboardClient({
                 <tbody className="divide-y divide-slate-800/60 bg-slate-950/60">
                   {productos.length === 0 ? (
                     <tr>
-                      <td className="px-5 py-6 text-center text-slate-400" colSpan={5}>
+                      <td className="px-5 py-6 text-center text-slate-400" colSpan={6}>
                         No hay productos aún. Crea el primero con el botón de arriba.
                       </td>
                     </tr>
@@ -663,6 +714,15 @@ export default function DashboardClient({
                             </span>
                           </td>
                           <td className="px-5 py-4">
+                            {producto.dom_id ? (
+                              <code className="text-xs bg-slate-800 px-2 py-1 rounded text-cyan-300 font-mono">
+                                {producto.dom_id}
+                              </code>
+                            ) : (
+                              <span className="text-xs text-slate-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-5 py-4">
                             {producto.visible ? (
                               <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">
                                 Visible
@@ -705,6 +765,29 @@ export default function DashboardClient({
                 </tbody>
               </table>
             </div>
+          </section>
+        )}
+
+        {/* Tab Content: Site Config */}
+        {selectedTienda && activeTab === "config" && (
+          <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
+            <SiteConfigEditor
+              tienda={selectedTienda}
+              userId={userId}
+              onSave={(newConfig) => {
+                setSelectedTienda((prev) => ({ ...prev, site_config: newConfig }));
+              }}
+            />
+          </section>
+        )}
+
+        {/* Tab Content: Testimonios */}
+        {selectedTienda && activeTab === "testimonios" && (
+          <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
+            <TestimoniosEditor
+              tiendaId={selectedTienda.id}
+              userId={userId}
+            />
           </section>
         )}
       </div>

@@ -1,4 +1,4 @@
-/* Mineiro Engine v2 - Hybrid Mode (Injection + Hydration) */
+/* Mineiro Engine v3 - Full Site Editing Support */
 (function () {
   "use strict";
 
@@ -47,6 +47,14 @@
   const log = (msg, ...args) => console.log(`[Mineiro] ${msg}`, ...args);
   const warn = (msg, ...args) => console.warn(`[Mineiro] ${msg}`, ...args);
 
+  const getNestedValue = (obj, path) => {
+    return path.split(".").reduce((acc, key) => {
+      if (acc == null) return undefined;
+      const idx = parseInt(key, 10);
+      return !isNaN(idx) ? acc[idx] : acc[key];
+    }, obj);
+  };
+
   /* ─────────────────────────────────────────────────────────────────────────
      SUPABASE LOADER
      ───────────────────────────────────────────────────────────────────────── */
@@ -70,6 +78,7 @@
   let tiendaData = null;
   let productosCache = [];
   let seccionesCache = [];
+  let testimoniosCache = [];
 
   const initSupabase = async (config) => {
     const sb = await loadSupabase();
@@ -106,6 +115,17 @@
       .eq("visible", true)
       .order("nombre", { ascending: true });
     if (error) throw error;
+    return data ?? [];
+  };
+
+  const fetchTestimonios = async (tiendaId) => {
+    const { data, error } = await supabase
+      .from("testimonios")
+      .select("*")
+      .eq("tienda_id", tiendaId)
+      .eq("visible", true)
+      .order("orden", { ascending: true });
+    if (error && error.code !== "PGRST116") throw error; // Ignore "table not found"
     return data ?? [];
   };
 
@@ -263,86 +283,160 @@
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     HYDRATION MODE: Bind existing DOM elements to product data
+     HYDRATION MODE: Bind existing DOM elements to data
+     Supports: producto-{dom_id}.field, config-tienda.field, hero.field,
+               footer.field, testimonio-{dom_id}.field
      ───────────────────────────────────────────────────────────────────────── */
 
   const parseBinding = (binding) => {
-    // Format: "producto-{id}.{field}" or "producto-{id}.variante.{index}.precio"
-    const match = binding.match(/^producto-([a-zA-Z0-9\-]+)\.(.+)$/);
-    if (!match) return null;
-    return { productId: match[1], field: match[2] };
+    // Config tienda: "config-tienda.nombre_tienda"
+    if (binding.startsWith("config-tienda.")) {
+      return { type: "config", field: binding.replace("config-tienda.", "") };
+    }
+
+    // Hero: "hero.titulo"
+    if (binding.startsWith("hero.")) {
+      return { type: "hero", field: binding.replace("hero.", "") };
+    }
+
+    // Footer: "footer.descripcion"
+    if (binding.startsWith("footer.")) {
+      return { type: "footer", field: binding.replace("footer.", "") };
+    }
+
+    // Testimonios config: "testimonios-config.titulo"
+    if (binding.startsWith("testimonios-config.")) {
+      return { type: "testimonios-config", field: binding.replace("testimonios-config.", "") };
+    }
+
+    // Testimonio individual: "testimonio-{dom_id}.nombre"
+    const testimonioMatch = binding.match(/^testimonio-([a-zA-Z0-9\-_]+)\.(.+)$/);
+    if (testimonioMatch) {
+      return { type: "testimonio", domId: testimonioMatch[1], field: testimonioMatch[2] };
+    }
+
+    // Producto: "producto-{dom_id_or_uuid}.nombre"
+    const productoMatch = binding.match(/^producto-([a-zA-Z0-9\-_]+)\.(.+)$/);
+    if (productoMatch) {
+      return { type: "producto", identifier: productoMatch[1], field: productoMatch[2] };
+    }
+
+    return null;
   };
 
-  const getNestedValue = (obj, path) => {
-    return path.split(".").reduce((acc, key) => {
-      if (acc == null) return undefined;
-      // Handle array index like "variantes.0.precio"
-      const idx = parseInt(key, 10);
-      return !isNaN(idx) ? acc[idx] : acc[key];
-    }, obj);
-  };
+  const applyValueToElement = (el, value, field) => {
+    if (value === undefined || value === null) return false;
 
-  const hydrateElement = (el, productos) => {
-    const binding = el.dataset.mineiroBind;
-    const parsed = parseBinding(binding);
-    if (!parsed) {
-      warn(`Invalid binding format: ${binding}`);
-      return;
-    }
-
-    const producto = productos.find((p) => String(p.id) === parsed.productId);
-    if (!producto) {
-      warn(`Product not found for binding: ${binding}`);
-      return;
-    }
-
-    let value;
-
-    // Handle nested paths like "configuracion.variantes.0.precio"
-    if (parsed.field.includes(".")) {
-      value = getNestedValue(producto, parsed.field);
-    } else {
-      value = producto[parsed.field];
-    }
-
-    if (value === undefined) {
-      warn(`Field "${parsed.field}" not found in product ${parsed.productId}`);
-      return;
-    }
-
-    // Format price fields
-    const priceFields = ["precio"];
-    const isPriceField =
-      priceFields.includes(parsed.field) ||
-      parsed.field.endsWith(".precio");
-    if (isPriceField && typeof value === "number") {
-      value = formatCLP(value);
-    }
-
-    // Determine how to apply the value based on element/attribute
     const tagName = el.tagName.toLowerCase();
 
-    if (parsed.field === "imagen_url" || parsed.field.endsWith(".imagen")) {
-      // Image binding
+    // Image fields
+    const imageFields = ["imagen_url", "imagen", "imagen_fondo", "logo_url", "avatar"];
+    const isImageField = imageFields.some(f => field === f || field.endsWith(`.${f}`));
+
+    if (isImageField) {
       if (tagName === "img") {
         el.src = value;
       } else {
         el.style.backgroundImage = `url('${value}')`;
       }
-    } else {
-      // Text binding
+    }
+    // Link fields
+    else if (field.endsWith("_url") || field === "url" || field === "link") {
+      if (tagName === "a") {
+        el.href = value;
+      } else {
+        el.textContent = value;
+      }
+    }
+    // Price fields
+    else if (field === "precio" || field.endsWith(".precio")) {
+      el.textContent = typeof value === "number" ? formatCLP(value) : value;
+    }
+    // Rating (stars)
+    else if (field === "rating") {
+      const stars = parseInt(value, 10) || 0;
+      el.textContent = "★".repeat(stars) + "☆".repeat(Math.max(0, 5 - stars));
+    }
+    // Default: text content
+    else {
       el.textContent = value;
     }
 
-    // Mark as hydrated
     el.dataset.mineiroHydrated = "true";
+    return true;
   };
 
-  const runHydrationMode = (productos) => {
+  const hydrateElement = (el, tienda, productos, testimonios) => {
+    const binding = el.dataset.mineiroBind;
+    const parsed = parseBinding(binding);
+
+    if (!parsed) {
+      warn(`Invalid binding format: ${binding}`);
+      return;
+    }
+
+    let value;
+    const siteConfig = tienda.site_config || {};
+
+    switch (parsed.type) {
+      case "config": {
+        // Try from site_config.config first, then tienda fields
+        value = getNestedValue(siteConfig.config, parsed.field) 
+             ?? getNestedValue(tienda, parsed.field)
+             ?? tienda[parsed.field === "nombre_tienda" ? "nombre_negocio" : parsed.field];
+        break;
+      }
+
+      case "hero": {
+        value = getNestedValue(siteConfig.hero, parsed.field);
+        break;
+      }
+
+      case "footer": {
+        value = getNestedValue(siteConfig.footer, parsed.field)
+             ?? (parsed.field === "nombre_tienda" ? tienda.nombre_negocio : undefined);
+        break;
+      }
+
+      case "testimonios-config": {
+        value = getNestedValue(siteConfig.testimonios_config, parsed.field);
+        break;
+      }
+
+      case "testimonio": {
+        const testimonio = testimonios.find(t => t.dom_id === parsed.domId);
+        if (testimonio) {
+          value = getNestedValue(testimonio, parsed.field) ?? testimonio[parsed.field];
+        }
+        break;
+      }
+
+      case "producto": {
+        // Find by dom_id first, then by UUID
+        const producto = productos.find(p => p.dom_id === parsed.identifier)
+                      || productos.find(p => String(p.id) === parsed.identifier);
+        if (producto) {
+          value = parsed.field.includes(".")
+            ? getNestedValue(producto, parsed.field)
+            : producto[parsed.field];
+        }
+        break;
+      }
+    }
+
+    if (value !== undefined && value !== null) {
+      applyValueToElement(el, value, parsed.field);
+    } else {
+      // Keep original content as fallback
+      log(`No value found for binding: ${binding}`);
+    }
+  };
+
+  const runHydrationMode = (tienda, productos, testimonios) => {
     const elements = document.querySelectorAll("[data-mineiro-bind]");
     elements.forEach((el) => {
       try {
-        hydrateElement(el, productos);
+        hydrateElement(el, tienda, productos, testimonios);
       } catch (err) {
         warn(`Hydration error for element:`, el, err);
       }
@@ -350,21 +444,19 @@
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     DOM ID BINDING: Bind by dom_id field in productos/secciones
+     DOM ID BINDING: Bind by dom_id field in productos/secciones/testimonios
      ───────────────────────────────────────────────────────────────────────── */
 
-  const runDomIdBinding = (productos, secciones) => {
+  const runDomIdBinding = (productos, secciones, testimonios) => {
     // Bind products by dom_id
     productos.forEach((producto) => {
       if (!producto.dom_id) return;
       const el = document.getElementById(producto.dom_id);
       if (!el) return;
 
-      // If it's a container, render the product card inside
       if (el.dataset.mineiroRender === "card") {
         renderProductCard(el, producto);
       }
-      // Otherwise just mark it for reference
       el.dataset.mineiroProductId = producto.id;
     });
 
@@ -374,20 +466,26 @@
       const el = document.getElementById(seccion.dom_id);
       if (!el) return;
 
-      // Apply custom styles from JSONB
       if (seccion.estilos) {
         Object.assign(el.style, seccion.estilos);
       }
 
       el.dataset.mineiroSeccionId = seccion.id;
 
-      // If it's a section container, render products of that section
       if (el.dataset.mineiroRender === "section") {
         const sectionProducts = productos.filter(
           (p) => p.seccion_id === seccion.id
         );
         renderSectionProducts(el, seccion.nombre, sectionProducts);
       }
+    });
+
+    // Bind testimonios by dom_id
+    testimonios.forEach((testimonio) => {
+      if (!testimonio.dom_id) return;
+      const el = document.getElementById(testimonio.dom_id);
+      if (!el) return;
+      el.dataset.mineiroTestimonioId = testimonio.id;
     });
   };
 
@@ -434,35 +532,39 @@
         return;
       }
 
-      // Check payment status
-      if (tiendaData.estado_pago === false) {
+      log("Tienda loaded:", tiendaData.nombre_negocio);
+
+      // Check payment status - allow trial period
+      if (tiendaData.estado_pago === false && tiendaData.plan !== "trial") {
         showSuspendedBanner();
         return;
       }
 
-      // Fetch data
-      const [productos, secciones] = await Promise.all([
+      // Fetch data in parallel
+      const [productos, secciones, testimonios] = await Promise.all([
         fetchProductos(tiendaData.id),
         fetchSecciones(tiendaData.id),
+        fetchTestimonios(tiendaData.id).catch(() => []),
       ]);
 
       productosCache = productos;
       seccionesCache = secciones;
+      testimoniosCache = testimonios;
 
-      log(`Loaded ${productos.length} products, ${secciones.length} sections`);
+      log(`Loaded ${productos.length} products, ${secciones.length} sections, ${testimonios.length} testimonios`);
 
-      // Run both modes
+      // Run all binding modes
+      runHydrationMode(tiendaData, productos, testimonios);
       runInjectionMode(productos);
-      runHydrationMode(productos);
-      runDomIdBinding(productos, secciones);
+      runDomIdBinding(productos, secciones, testimonios);
 
       // Attach variant listeners after all rendering
       attachVariantListeners();
 
-      log("Engine ready");
+      log("Engine v3 ready ✓");
     } catch (err) {
       warn("Initialization failed (page remains intact):", err.message);
-      // Fail silently - don't break the page
+      console.error(err);
     }
   };
 

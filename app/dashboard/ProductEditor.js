@@ -278,6 +278,7 @@ export default function ProductEditor({
       categoria: product?.categoria || "",
       imagen_url: product?.imagen_url || "",
       visible: product?.visible ?? true,
+      dom_id: product?.dom_id || "",
       variantes: product?.configuracion?.variantes || [
         { nombre: "Normal", precio: 0 },
       ],
@@ -344,6 +345,7 @@ export default function ProductEditor({
         categoria: data.categoria,
         imagen_url: data.imagen_url || "",
         visible: data.visible,
+        dom_id: data.dom_id || null,
         configuracion: useVariants
           ? { variantes: data.variantes.map((v) => ({ ...v, precio: parseInt(v.precio, 10) })) }
           : null,
@@ -486,6 +488,22 @@ export default function ProductEditor({
                         <option key={i} value={cat} />
                       ))}
                     </datalist>
+                  </div>
+
+                  {/* DOM ID for binding */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      DOM ID (para binding)
+                    </label>
+                    <input
+                      {...register("dom_id")}
+                      type="text"
+                      placeholder="Ej: producto-labial"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      Usa este ID en el HTML del cliente: <code className="bg-slate-700 px-1 rounded">data-mineiro-bind="producto-{"{dom_id}"}.nombre"</code>
+                    </p>
                   </div>
 
                   {/* Price Mode Switch */}
