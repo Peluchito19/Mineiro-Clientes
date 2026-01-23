@@ -25,7 +25,50 @@
   const log = (msg, ...args) => console.log(`%c[Mineiro]%c ${msg}`, "color:#f59e0b;font-weight:bold", "color:inherit", ...args);
   const warn = (msg, ...args) => console.warn(`[Mineiro] ${msg}`, ...args);
 
-  const generateId = () => `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  // Genera un ID DETERMINÍSTICO basado SOLO en la posición del elemento
+  // NO usa el texto porque el texto puede cambiar después de la hidratación
+  const generateStableId = (el) => {
+    const tag = el.tagName.toLowerCase();
+    
+    // Calcular posición exacta del elemento en el DOM
+    const getPositionPath = (element) => {
+      const parts = [];
+      let current = element;
+      while (current && current !== document.body && current.parentNode) {
+        const parent = current.parentNode;
+        if (!parent.children) break;
+        
+        // Índice entre TODOS los hijos (no solo del mismo tag)
+        const allSiblings = Array.from(parent.children);
+        const idx = allSiblings.indexOf(current);
+        
+        // También contar índice entre hermanos del mismo tipo
+        const sameSiblings = allSiblings.filter(c => c.tagName === current.tagName);
+        const sameIdx = sameSiblings.indexOf(current);
+        
+        parts.unshift(`${current.tagName.toLowerCase()}[${idx}:${sameIdx}]`);
+        current = parent;
+        
+        if (parts.length > 6) break; // Limitar profundidad
+      }
+      return parts.join("/");
+    };
+    
+    const path = getPositionPath(el);
+    
+    // Crear un hash simple pero estable basado SOLO en posición
+    const input = `${path}`;
+    let hash = 0;
+    for (let i = 0; i < input.length; i++) {
+      const char = input.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    
+    // Convertir a string positivo
+    const hashStr = Math.abs(hash).toString(36);
+    return `m-${tag}-${hashStr}`;
+  };
 
   const formatPrice = (value, currency = "CLP") => {
     try {
@@ -227,10 +270,10 @@
       const type = detectElementType(el);
       if (type === ElementTypes.UNKNOWN) return;
 
-      // Generar o usar ID existente
+      // Generar o usar ID existente - SIEMPRE usar ID estable basado en contenido
       let elementId = el.id || el.dataset.mineiroId;
       if (!elementId) {
-        elementId = generateId();
+        elementId = generateStableId(el);
         el.dataset.mineiroId = elementId;
       }
 
@@ -306,7 +349,7 @@
       }
     }
     
-    return `[data-mineiro-id="${el.dataset.mineiroId || generateId()}"]`;
+    return `[data-mineiro-id="${el.dataset.mineiroId || generateStableId(el)}"]`;
   };
 
   const generateReadableName = (el, type, context) => {
@@ -538,19 +581,23 @@
     Object.entries(savedValues).forEach(([elementId, data]) => {
       // Buscar por múltiples métodos
       let el = null;
+      let foundBy = "";
       
       // 1. Por ID nativo
       el = document.getElementById(elementId);
+      if (el) foundBy = "id";
       
       // 2. Por data-mineiro-id
       if (!el) {
         el = document.querySelector(`[data-mineiro-id="${elementId}"]`);
+        if (el) foundBy = "data-mineiro-id";
       }
       
       // 3. Por selector guardado
       if (!el && data.selector) {
         try {
           el = document.querySelector(data.selector);
+          if (el) foundBy = "selector";
         } catch (e) {
           // Selector inválido
         }
@@ -560,6 +607,7 @@
       if (!el && data.metadata?.selector) {
         try {
           el = document.querySelector(data.metadata.selector);
+          if (el) foundBy = "metadata.selector";
         } catch (e) {
           // Selector inválido
         }
@@ -568,12 +616,14 @@
       if (el) {
         hydrateElement(el, data.value, data.type, data.metadata);
         hydrated++;
+        log(`✓ Hidratado "${elementId}" (${foundBy}) → "${data.value?.slice?.(0, 30) || data.value}"`);
       } else {
         failed++;
+        warn(`✗ No encontrado: "${elementId}" para valor "${data.value?.slice?.(0, 30) || data.value}"`);
       }
     });
 
-    log(`Hidratados ${hydrated} elementos, ${failed} no encontrados`);
+    log(`Hidratación completada: ${hydrated} OK, ${failed} fallidos`);
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -994,16 +1044,17 @@
       const siteId = getSiteId();
       log(`Site ID: ${siteId}`);
 
-      // 1. PRIMERO cargar valores guardados (antes de escanear)
-      const savedValues = await loadSavedValues(siteId);
-      
-      // 2. Escanear página (asigna data-mineiro-id a elementos)
+      // 1. PRIMERO escanear página (asigna data-mineiro-id ESTABLES a elementos)
       const elements = scanPage();
+      log(`Escaneados ${elements.length} elementos, asignados IDs estables`);
 
-      // 3. Hidratar con valores guardados
+      // 2. Cargar valores guardados de Supabase
+      const savedValues = await loadSavedValues(siteId);
+      log(`Cargados ${Object.keys(savedValues).length} valores editados de Supabase`);
+
+      // 3. Hidratar con valores guardados (AHORA los elementos ya tienen data-mineiro-id)
       if (Object.keys(savedValues).length > 0) {
         hydrateAll(savedValues);
-        log(`Aplicados ${Object.keys(savedValues).length} cambios guardados`);
       }
 
       // 4. Guardar mapa en Supabase (en background, SIN sobrescribir current_value)
