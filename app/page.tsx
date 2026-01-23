@@ -1,6 +1,17 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
+  const headerList = headers();
+  const host =
+    headerList.get("x-forwarded-host") ||
+    headerList.get("host") ||
+    "mineiro-clientes.vercel.app";
+  const protocol = headerList.get("x-forwarded-proto") || "https";
+  const scriptUrl = `${protocol}://${host}/mineiro.js`;
+
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 overflow-hidden">
       {/* Background Effects */}
@@ -107,7 +118,7 @@ export default function Home() {
                   <span className="text-violet-400">{"<script"}</span>
                   <span className="text-cyan-300">{" src"}</span>
                   <span className="text-white">{"="}</span>
-                  <span className="text-amber-300">{'"https://mineiro.app/m.js"'}</span>
+                  <span className="text-amber-300">{`"${scriptUrl}"`}</span>
                   <span className="text-violet-400">{">"}</span>
                   <span className="text-violet-400">{"</script>"}</span>
                 </code>
