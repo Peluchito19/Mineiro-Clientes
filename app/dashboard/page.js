@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import DashboardClient from "./DashboardClient";
 
@@ -23,9 +22,9 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
-      get: (name) => cookieStore.get(name)?.value,
-      set: () => {},
-      remove: () => {},
+      get(name) {
+        return cookieStore.get(name)?.value;
+      },
     },
   });
 
@@ -33,18 +32,28 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Middleware should have redirected, but just in case
   if (!user) {
-    redirect("/login");
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="text-center text-slate-300">
+          <h1 className="text-xl font-semibold text-white mb-2">
+            Sesión no encontrada
+          </h1>
+          <p>Por favor <a href="/login" className="text-cyan-400 underline">inicia sesión</a>.</p>
+        </div>
+      </div>
+    );
   }
 
-  // Get all tiendas for this user (multiple stores support)
+  // Get all tiendas for this user
   const { data: tiendas } = await supabase
     .from("tiendas")
     .select("id, nombre_negocio, url_web, slug, estado_pago, plan, user_id")
     .eq("user_id", user.id)
     .order("created_at", { ascending: true });
 
-  // Get first tienda as default (or null if none)
+  // Get first tienda as default
   const tienda = tiendas?.[0] ?? null;
 
   // Get productos for the first tienda
@@ -61,6 +70,7 @@ export default async function DashboardPage() {
   return (
     <DashboardClient
       userId={user.id}
+      userEmail={user.email}
       initialTiendas={tiendas ?? []}
       initialTienda={tienda}
       initialProductos={productos}

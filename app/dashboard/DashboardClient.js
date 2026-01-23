@@ -7,6 +7,7 @@ import ProductEditor from "./ProductEditor";
 
 export default function DashboardClient({
   userId,
+  userEmail,
   initialTiendas = [],
   initialTienda,
   initialProductos,
@@ -17,6 +18,12 @@ export default function DashboardClient({
   // Multi-store support
   const [tiendas, setTiendas] = useState(initialTiendas);
   const [selectedTienda, setSelectedTienda] = useState(initialTienda);
+  
+  // Onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(initialTiendas.length === 0);
+  const [onboardingStep, setOnboardingStep] = useState(1);
+  const [onboardingNombre, setOnboardingNombre] = useState("");
+  const [onboardingUrl, setOnboardingUrl] = useState("");
   
   // Store form
   const [tiendaNombre, setTiendaNombre] = useState(initialTienda?.nombre_negocio ?? "");
@@ -241,12 +248,139 @@ export default function DashboardClient({
   const handleLogout = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
-    router.push("/login");
+    window.location.href = "/login";
+  };
+
+  // Onboarding: Create first store
+  const handleOnboardingComplete = async () => {
+    if (!supabase || !onboardingNombre) return;
+    setCreatingTienda(true);
+
+    const slug = onboardingNombre
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "")
+      .slice(0, 30);
+
+    const { data, error } = await supabase
+      .from("tiendas")
+      .insert({
+        user_id: userId,
+        nombre_negocio: onboardingNombre,
+        url_web: onboardingUrl,
+        slug: slug || `tienda-${Date.now()}`,
+        estado_pago: false,
+        plan: "trial",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      alert("Error al crear tienda: " + error.message);
+      setCreatingTienda(false);
+      return;
+    }
+
+    setTiendas([data]);
+    setSelectedTienda(data);
+    setTiendaNombre(data.nombre_negocio);
+    setTiendaUrl(data.url_web);
+    setTiendaSlug(data.slug);
+    setShowOnboarding(false);
+    setCreatingTienda(false);
   };
 
   // Trial/Payment status
   const isPaid = selectedTienda?.estado_pago === true;
   const plan = selectedTienda?.plan || "trial";
+
+  // Show onboarding for new users
+  if (showOnboarding) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <div className="relative isolate overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.15),_transparent_60%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(124,58,237,0.18),_transparent_55%)]" />
+
+          <div className="relative mx-auto flex min-h-screen max-w-2xl items-center justify-center px-6 py-16">
+            <div className="w-full rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-2xl backdrop-blur">
+              {/* Welcome */}
+              <div className="text-center mb-8">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-2xl">
+                  🎉
+                </div>
+                <h1 className="text-3xl font-bold text-white mb-2">
+                  ¡Bienvenido a Mineiro!
+                </h1>
+                <p className="text-slate-300">
+                  Configura tu primera tienda para comenzar
+                </p>
+              </div>
+
+              {/* Form */}
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-200">
+                    ¿Cómo se llama tu negocio? *
+                  </label>
+                  <input
+                    type="text"
+                    value={onboardingNombre}
+                    onChange={(e) => setOnboardingNombre(e.target.value)}
+                    placeholder="Ej: Pizzería Don Luigi"
+                    className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-200">
+                    URL de tu página web (opcional)
+                  </label>
+                  <input
+                    type="url"
+                    value={onboardingUrl}
+                    onChange={(e) => setOnboardingUrl(e.target.value)}
+                    placeholder="https://www.minegocio.com"
+                    className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
+                  />
+                  <p className="text-xs text-slate-400">
+                    La URL donde instalarás el menú de Mineiro
+                  </p>
+                </div>
+
+                {/* Trial info */}
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="text-xl">🎁</span>
+                    <div>
+                      <p className="font-medium text-amber-200">
+                        Prueba gratuita de 5 días
+                      </p>
+                      <p className="text-sm text-amber-200/70 mt-1">
+                        Acceso completo a todas las funciones. Sin compromiso.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleOnboardingComplete}
+                  disabled={!onboardingNombre || creatingTienda}
+                  className="w-full rounded-xl bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500 px-6 py-4 text-lg font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {creatingTienda ? "Creando tu tienda..." : "Comenzar mi prueba gratuita →"}
+                </button>
+
+                <p className="text-center text-xs text-slate-400">
+                  Al continuar, aceptas nuestros términos de servicio.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">

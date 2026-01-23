@@ -47,9 +47,6 @@ export default function LoginPage() {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/dashboard`,
-          },
         });
 
         if (signUpError) {
@@ -61,17 +58,21 @@ export default function LoginPage() {
         // Check if email confirmation is required
         if (data?.user?.identities?.length === 0) {
           setError("Este correo ya está registrado. Intenta iniciar sesión.");
+          setLoading(false);
         } else if (data?.user && !data?.session) {
           setMessage(
             "¡Cuenta creada! Revisa tu correo para confirmar tu cuenta."
           );
-        } else {
+          setLoading(false);
+        } else if (data?.session) {
+          // Auto-confirmed, redirect
           setMessage("¡Cuenta creada! Redirigiendo...");
-          router.push("/dashboard");
+          // Force a hard refresh to trigger middleware
+          window.location.href = "/dashboard";
         }
       } else {
         // LOGIN
-        const { error: signInError } = await supabase.auth.signInWithPassword({
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
@@ -89,8 +90,11 @@ export default function LoginPage() {
           return;
         }
 
-        setMessage("¡Bienvenido! Redirigiendo...");
-        router.push("/dashboard");
+        if (data?.session) {
+          setMessage("¡Bienvenido! Redirigiendo...");
+          // Force a hard refresh to trigger middleware and set cookies
+          window.location.href = "/dashboard";
+        }
       }
     } catch (err) {
       console.error("Auth error:", err);
@@ -101,7 +105,6 @@ export default function LoginPage() {
       } else {
         setError("Ocurrió un error inesperado. Intenta de nuevo.");
       }
-    } finally {
       setLoading(false);
     }
   };
