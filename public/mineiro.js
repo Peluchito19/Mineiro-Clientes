@@ -12,9 +12,13 @@
 (function() {
   "use strict";
 
-  const VERSION = "4.0.0";
+  const VERSION = "4.1.0";
   const SUPABASE_URL = "https://zzgyczbiufafthizurbv.supabase.co";
-  const SUPABASE_KEY = "sb_publishable_1HENvCdV9vCRsBX36N2U8g_zqlAlFT9";
+  // Clave anon pública de Supabase - busca en el atributo del script o usa default
+  const getSupabaseKey = () => {
+    const script = document.querySelector("script[data-mineiro-key]");
+    return script?.dataset.mineiroKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp6Z3ljemJpdWZhZnRoaXp1cmJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc2NDUyNDksImV4cCI6MjA1MzIyMTI0OX0.SsJEBEVlvJPoHwrxNEKnAiF2mtv7Xa2OUBuhT0rGHiM";
+  };
   const SUPABASE_CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
   const DASHBOARD_URL = "https://mineiro-clientes.vercel.app";
 
@@ -403,7 +407,9 @@
 
   const initSupabase = async () => {
     const sb = await loadSupabase();
-    supabase = sb.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const key = getSupabaseKey();
+    supabase = sb.createClient(SUPABASE_URL, key);
+    log("Supabase conectado");
     return supabase;
   };
 
@@ -1070,11 +1076,48 @@
       }
 
       log("✓ Engine listo");
+      
+      // Mostrar indicador de estado (solo en desarrollo o con debug)
+      if (window.location.search.includes("mineiro-debug")) {
+        showDebugPanel(siteId, elements.length, Object.keys(savedValues).length);
+      }
 
     } catch (err) {
       warn("Error de inicialización:", err);
       console.error(err);
+      
+      // Mostrar error visual si hay problemas
+      showErrorBanner(err.message);
     }
+  };
+  
+  const showDebugPanel = (siteId, scanned, saved) => {
+    const panel = document.createElement("div");
+    panel.id = "mineiro-debug";
+    panel.innerHTML = `
+      <div style="position:fixed;bottom:20px;right:20px;background:#1a1a2e;color:#fff;padding:15px;border-radius:8px;font-family:monospace;font-size:12px;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3)">
+        <div style="color:#f59e0b;font-weight:bold;margin-bottom:10px">🔧 Mineiro Debug v${VERSION}</div>
+        <div>Site ID: <span style="color:#4ade80">${siteId}</span></div>
+        <div>Elementos escaneados: <span style="color:#60a5fa">${scanned}</span></div>
+        <div>Valores guardados: <span style="color:#f472b6">${saved}</span></div>
+        <div style="margin-top:10px">
+          <button onclick="MineiroAdmin.enable()" style="background:#f59e0b;color:#000;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;margin-right:5px">Editar</button>
+          <button onclick="document.getElementById('mineiro-debug').remove()" style="background:#374151;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer">Cerrar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+  };
+  
+  const showErrorBanner = (message) => {
+    const banner = document.createElement("div");
+    banner.innerHTML = `
+      <div style="position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;padding:10px 20px;font-family:sans-serif;font-size:14px;z-index:99999;text-align:center">
+        ⚠️ Mineiro Error: ${message}
+        <button onclick="this.parentElement.remove()" style="background:transparent;color:#fff;border:1px solid #fff;padding:2px 8px;margin-left:10px;cursor:pointer;border-radius:4px">×</button>
+      </div>
+    `;
+    document.body.appendChild(banner);
   };
 
   // Iniciar cuando el DOM esté listo
