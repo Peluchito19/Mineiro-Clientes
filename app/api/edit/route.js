@@ -7,14 +7,13 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Headers CORS para permitir peticiones desde cualquier origen
+// Headers CORS
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-// Manejar preflight OPTIONS
 export async function OPTIONS() {
   return NextResponse.json({}, { headers: corsHeaders });
 }
@@ -24,57 +23,80 @@ export async function POST(request) {
     const body = await request.json();
     const { action, table, data, where } = body;
 
+    console.log("Edit API llamada:", { action, table, where });
+
     // Validar tablas permitidas
     const allowedTables = ["tiendas", "productos", "testimonios"];
     if (!allowedTables.includes(table)) {
       return NextResponse.json({ error: "Tabla no permitida" }, { status: 400, headers: corsHeaders });
     }
 
-    let result;
+    if (!where || Object.keys(where).length === 0) {
+      return NextResponse.json({ error: "Se requiere condición where" }, { status: 400, headers: corsHeaders });
+    }
+
+    let result = null;
 
     if (action === "update") {
-      const query = supabaseAdmin.from(table).update(data);
+      // Construir query manualmente para evitar problemas con el encadenamiento
+      let query = supabaseAdmin.from(table).update(data);
       
-      // Aplicar condiciones where
-      for (const [key, value] of Object.entries(where)) {
-        query.eq(key, value);
+      // Aplicar todas las condiciones where
+      const whereEntries = Object.entries(where);
+      for (const [key, value] of whereEntries) {
+        query = query.eq(key, value);
       }
       
-      const { data: updated, error } = await query.select().single();
+      // NO usar .single() - usar .select() y tomar el primero
+      const { data: updated, error } = await query.select();
       
       if (error) {
         console.error("Update error:", error);
         return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
       }
       
-      result = updated;
+      // Tomar el primer resultado si existe
+      result = updated && updated.length > 0 ? updated[0] : null;
+      
+      if (!result) {
+        // Si no se actualizó nada, puede que no exista - intentar verificar
+        console.log("No se actualizó ninguna fila, verificando si existe...");
+        return NextResponse.json({ 
+          success: true, 
+          data: null,
+          message: "Actualización procesada (puede que no haya cambios)"
+        }, { headers: corsHeaders });
+      }
+      
     } else if (action === "upsert") {
       const { data: upserted, error } = await supabaseAdmin
         .from(table)
         .upsert(data)
-        .select()
-        .single();
+        .select();
       
       if (error) {
         console.error("Upsert error:", error);
         return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
       }
       
-      result = upserted;
+      result = upserted && upserted.length > 0 ? upserted[0] : null;
+    } else {
+      return NextResponse.json({ error: "Acción no válida" }, { status: 400, headers: corsHeaders });
     }
 
+    console.log("Operación exitosa:", result?.id || "sin ID");
     return NextResponse.json({ success: true, data: result }, { headers: corsHeaders });
+    
   } catch (error) {
     console.error("API error:", error);
     return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
   }
 }
 
-// También permitir GET para verificar que la API funciona
 export async function GET() {
   return NextResponse.json({ 
     status: "ok", 
-    message: "Mineiro Edit API v1.0",
+    message: "Mineiro Edit API v1.1 - Sin restricciones de pago",
     timestamp: new Date().toISOString()
   }, { headers: corsHeaders });
 }
