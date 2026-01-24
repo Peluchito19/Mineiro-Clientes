@@ -2212,6 +2212,20 @@
         background: #06b6d4;
         color: #0f172a;
       }
+      .mineiro-restore-btn {
+        background: #1e293b;
+        border-color: #f59e0b;
+        color: #f59e0b;
+      }
+      .mineiro-restore-btn:hover {
+        background: #f59e0b;
+        color: #0f172a;
+      }
+      .mineiro-restore-btn.active {
+        background: #f59e0b;
+        border-color: #f59e0b;
+        color: #0f172a;
+      }
       .mineiro-format-separator {
         width: 1px;
         height: 24px;
@@ -2933,12 +2947,8 @@
             <option value="5">Grande</option>
             <option value="7">Muy grande</option>
           </select>
-        </div>
-        
-        <label>Estilo general</label>
-        <div class="mineiro-style-options">
-          <button type="button" class="mineiro-style-btn active" data-style="original">🔄 Original</button>
-          <button type="button" class="mineiro-style-btn" data-style="normal">Normal</button>
+          <span class="mineiro-format-separator"></span>
+          <button type="button" class="mineiro-format-btn mineiro-restore-btn" data-command="restore" title="Restaurar original">🔄</button>
         </div>
       `;
     } else if (isPrice) {
@@ -2961,20 +2971,14 @@
         
         <label>Formato de texto</label>
         <div class="mineiro-format-toolbar">
-          <button type="button" class="mineiro-format-btn" data-command="bold" title="Negrita"><b>B</b></button>
-          <button type="button" class="mineiro-format-btn" data-command="italic" title="Cursiva"><i>I</i></button>
-          <button type="button" class="mineiro-format-btn" data-command="underline" title="Subrayado"><u>U</u></button>
+          <button type="button" class="mineiro-format-btn" data-command="bold" title="Negrita (Ctrl+B)"><b>B</b></button>
+          <button type="button" class="mineiro-format-btn" data-command="italic" title="Cursiva (Ctrl+I)"><i>I</i></button>
+          <button type="button" class="mineiro-format-btn" data-command="underline" title="Subrayado (Ctrl+U)"><u>U</u></button>
           <button type="button" class="mineiro-format-btn" data-command="strikeThrough" title="Tachado"><s>S</s></button>
           <span class="mineiro-format-separator"></span>
           <input type="color" class="mineiro-color-picker" id="mineiro-text-color" value="#ffffff" title="Color de texto">
-        </div>
-        
-        <label>Estilo general del elemento</label>
-        <div class="mineiro-style-options">
-          <button type="button" class="mineiro-style-btn active" data-style="original">🔄 Original</button>
-          <button type="button" class="mineiro-style-btn" data-style="bold">Negrita</button>
-          <button type="button" class="mineiro-style-btn" data-style="italic">Cursiva</button>
-          <button type="button" class="mineiro-style-btn" data-style="uppercase">ABC</button>
+          <span class="mineiro-format-separator"></span>
+          <button type="button" class="mineiro-format-btn mineiro-restore-btn" data-command="restore" title="Restaurar original">🔄</button>
         </div>
       `;
     }
@@ -3074,21 +3078,8 @@
       });
     }
 
-    // Manejo de estilos de texto
-    const styleButtons = popup.querySelectorAll(".mineiro-style-btn");
-    let selectedStyle = "original";
-    
-    styleButtons.forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        styleButtons.forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-        selectedStyle = btn.dataset.style;
-        
-        // Preview del estilo en el elemento
-        previewStyleOnElement(el, selectedStyle, originalStyles.get(el));
-      });
-    });
+    // Variable para rastrear si se quiere restaurar original
+    let restoreOriginal = false;
 
     // Editor de texto enriquecido
     const richEditor = document.getElementById("mineiro-rich-editor");
@@ -3102,6 +3093,10 @@
         if (input) {
           input.value = richEditor.textContent;
         }
+        // Si el usuario edita, desactivar restaurar original
+        restoreOriginal = false;
+        const restoreBtn = popup.querySelector('[data-command="restore"]');
+        if (restoreBtn) restoreBtn.classList.remove('active');
       });
       
       // Prevenir propagación
@@ -3114,6 +3109,24 @@
           e.preventDefault();
           e.stopPropagation();
           const command = btn.dataset.command;
+          
+          // Comando especial: restaurar original
+          if (command === 'restore') {
+            const codeOriginal = htmlOriginalDelCodigo.get(el);
+            if (codeOriginal) {
+              richEditor.innerHTML = codeOriginal.innerHTML;
+              if (input) input.value = codeOriginal.textContent;
+              restoreOriginal = true;
+              btn.classList.add('active');
+              log("Contenido restaurado al original del código HTML");
+            }
+            return;
+          }
+          
+          // Desactivar restaurar si se aplica formato
+          restoreOriginal = false;
+          const restoreBtn = popup.querySelector('[data-command="restore"]');
+          if (restoreBtn) restoreBtn.classList.remove('active');
           
           // Asegurar que el foco esté en el editor
           richEditor.focus();
@@ -3129,10 +3142,28 @@
         });
       });
       
+      // Detectar estado inicial de formato
+      richEditor.addEventListener("focus", updateFormatButtonStates);
+      richEditor.addEventListener("keyup", updateFormatButtonStates);
+      richEditor.addEventListener("mouseup", updateFormatButtonStates);
+      
+      function updateFormatButtonStates() {
+        formatButtons.forEach(btn => {
+          const command = btn.dataset.command;
+          if (['bold', 'italic', 'underline', 'strikeThrough'].includes(command)) {
+            const isActive = document.queryCommandState(command);
+            btn.classList.toggle('active', isActive);
+          }
+        });
+      }
+      
       // Selector de tamaño de fuente
       if (fontSizeSelect) {
         fontSizeSelect.addEventListener("change", (e) => {
           e.stopPropagation();
+          restoreOriginal = false;
+          const restoreBtn = popup.querySelector('[data-command="restore"]');
+          if (restoreBtn) restoreBtn.classList.remove('active');
           richEditor.focus();
           document.execCommand('fontSize', false, e.target.value);
         });
@@ -3142,6 +3173,9 @@
       if (textColorPicker) {
         textColorPicker.addEventListener("input", (e) => {
           e.stopPropagation();
+          restoreOriginal = false;
+          const restoreBtn = popup.querySelector('[data-command="restore"]');
+          if (restoreBtn) restoreBtn.classList.remove('active');
           richEditor.focus();
           document.execCommand('foreColor', false, e.target.value);
         });
@@ -3154,14 +3188,17 @@
             case 'b':
               e.preventDefault();
               document.execCommand('bold', false, null);
+              restoreOriginal = false;
               break;
             case 'i':
               e.preventDefault();
               document.execCommand('italic', false, null);
+              restoreOriginal = false;
               break;
             case 'u':
               e.preventDefault();
               document.execCommand('underline', false, null);
+              restoreOriginal = false;
               break;
           }
         }
@@ -3176,7 +3213,7 @@
     saveBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
       // Si hay editor enriquecido, usar su HTML
-      const valueToSave = richEditor ? richEditor.innerHTML : input?.value;
+      const selectedStyle = restoreOriginal ? "original" : "edited";
       await saveElementChange(el, parsed || { type: 'generic', field: binding }, isImage, isPrice, selectedStyle, binding, richEditor ? richEditor.innerHTML : null);
     });
 
@@ -3185,6 +3222,7 @@
       input?.addEventListener("keydown", async (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
+          const selectedStyle = restoreOriginal ? "original" : "edited";
           await saveElementChange(el, parsed || { type: 'generic', field: binding }, isImage, isPrice, selectedStyle, binding, null);
         }
       });
@@ -3531,8 +3569,12 @@
       // Usar el contenido original del código HTML
       value = codeOriginal.innerHTML;
       plainTextValue = codeOriginal.textContent;
-      valueForAPI = plainTextValue;
-      log("Guardando valor ORIGINAL del código HTML");
+      // Para restaurar: guardar el HTML original si tiene formato, sino texto plano
+      const hasHTMLInOriginal = value !== plainTextValue && (
+        value.includes('<') && value.includes('>')
+      );
+      valueForAPI = hasHTMLInOriginal ? value : plainTextValue;
+      log("Guardando valor ORIGINAL del código HTML:", valueForAPI);
     } else {
       // Obtener valor del editor: priorizar HTML enriquecido si existe
       value = richHTML || (richEditor ? richEditor.innerHTML : input?.value);
