@@ -119,21 +119,55 @@
     return window.location.hostname.replace(/\./g, "-");
   };
 
+  const TIENDA_API_URL = "https://mineiro-clientes.vercel.app/api/tienda";
+
   const fetchTienda = async (slug) => {
-    // Intentar buscar por slug, luego por hostname en url_web
     const hostname = window.location.hostname;
     
-    const { data, error } = await supabase
-      .from("tiendas")
-      .select("*")
-      .or(`slug.eq.${slug},url_web.ilike.%${hostname}%`)
-      .limit(1)
-      .maybeSingle();
-    
-    if (error && error.code !== 'PGRST116') {
-      warn("Error fetching tienda:", error.message);
+    try {
+      // Primero intentar con la API (más confiable)
+      const response = await fetch(`${TIENDA_API_URL}?slug=${encodeURIComponent(slug)}&hostname=${encodeURIComponent(hostname)}`);
+      const result = await response.json();
+      
+      if (result.found && result.tienda) {
+        return result.tienda;
+      }
+      
+      // Si no se encontró, crear la tienda automáticamente
+      log("Tienda no encontrada, creando automáticamente...");
+      const createResponse = await fetch(TIENDA_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: slug,
+          nombre: slug.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
+          url_web: window.location.origin
+        })
+      });
+      
+      const createResult = await createResponse.json();
+      if (createResult.success && createResult.tienda) {
+        log("Tienda creada exitosamente:", createResult.tienda.nombre_negocio);
+        return createResult.tienda;
+      }
+      
+      return null;
+    } catch (apiError) {
+      warn("Error con API, intentando directo con Supabase:", apiError.message);
+      
+      // Fallback a Supabase directo
+      const { data, error } = await supabase
+        .from("tiendas")
+        .select("*")
+        .or(`slug.eq.${slug},url_web.ilike.%${hostname}%`)
+        .limit(1)
+        .maybeSingle();
+      
+      if (error && error.code !== 'PGRST116') {
+        warn("Error fetching tienda:", error.message);
+      }
+      return data;
     }
-    return data;
   };
 
   const fetchProductos = async (tiendaId) => {
@@ -901,6 +935,11 @@
         case "hero":
         case "footer":
         case "testimonios-config": {
+          // Verificar que tiendaData existe
+          if (!tiendaData || !tiendaData.id) {
+            throw new Error("Tienda no configurada. Verifica el slug en data-mineiro-site");
+          }
+          
           // Update tienda.site_config
           const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
           
