@@ -7,6 +7,18 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
+// Headers CORS para permitir peticiones desde cualquier origen
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+// Manejar preflight OPTIONS
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -15,7 +27,7 @@ export async function POST(request) {
     // Validar tablas permitidas
     const allowedTables = ["tiendas", "productos", "testimonios"];
     if (!allowedTables.includes(table)) {
-      return NextResponse.json({ error: "Tabla no permitida" }, { status: 400 });
+      return NextResponse.json({ error: "Tabla no permitida" }, { status: 400, headers: corsHeaders });
     }
 
     let result;
@@ -32,7 +44,7 @@ export async function POST(request) {
       
       if (error) {
         console.error("Update error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
       }
       
       result = updated;
@@ -45,16 +57,16 @@ export async function POST(request) {
       
       if (error) {
         console.error("Upsert error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
       }
       
       result = upserted;
     }
 
-    return NextResponse.json({ success: true, data: result });
+    return NextResponse.json({ success: true, data: result }, { headers: corsHeaders });
   } catch (error) {
     console.error("API error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
   }
 }
 
@@ -64,5 +76,5 @@ export async function GET() {
     status: "ok", 
     message: "Mineiro Edit API v1.0",
     timestamp: new Date().toISOString()
-  });
+  }, { headers: corsHeaders });
 }
