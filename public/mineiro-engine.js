@@ -16,14 +16,25 @@
   const getConfig = () => {
     const script = document.currentScript || document.querySelector("script[data-store-slug]");
     const ds = script?.dataset ?? {};
+    
+    // Detectar slug de múltiples fuentes
+    let storeSlug = ds.storeSlug || ds.mineiroSite || document.querySelector("[data-store-slug]")?.dataset.storeSlug;
+    
+    // Si no hay slug explícito, extraer del hostname
+    if (!storeSlug) {
+      const hostname = window.location.hostname;
+      // Para Vercel: cosmeticos-fran.vercel.app -> cosmeticos-fran
+      if (hostname.endsWith('.vercel.app')) {
+        storeSlug = hostname.replace('.vercel.app', '');
+      } else {
+        storeSlug = hostname.replace(/\./g, "-");
+      }
+    }
+    
     return {
       supabaseUrl: ds.supabaseUrl || window.MINEIRO_SUPABASE_URL || DEFAULT_SUPABASE_URL,
       supabaseKey: ds.supabaseKey || window.MINEIRO_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY,
-      storeSlug:
-        ds.storeSlug ||
-        ds.mineiroSite ||
-        document.querySelector("[data-store-slug]")?.dataset.storeSlug ||
-        window.location.hostname.replace(/\./g, "-"),
+      storeSlug,
     };
   };
 

@@ -20,16 +20,23 @@ export async function OPTIONS() {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const slug = searchParams.get("slug");
+    let slug = searchParams.get("slug");
     const hostname = searchParams.get("hostname");
+
+    console.log("Buscando tienda:", { slug, hostname });
 
     if (!slug && !hostname) {
       return NextResponse.json({ error: "Se requiere slug o hostname" }, { status: 400, headers: corsHeaders });
     }
 
-    // Buscar por slug exacto
+    // Normalizar el slug (quitar sufijos como .vercel.app si alguien lo pasa completo)
+    if (slug) {
+      slug = slug.replace('.vercel.app', '').replace(/\./g, '-');
+    }
+
     let tienda = null;
     
+    // 1. Buscar por slug exacto
     if (slug) {
       const { data } = await supabaseAdmin
         .from("tiendas")
@@ -37,9 +44,10 @@ export async function GET(request) {
         .eq("slug", slug)
         .maybeSingle();
       tienda = data;
+      if (tienda) console.log("Encontrada por slug exacto:", tienda.nombre_negocio);
     }
 
-    // Si no se encontró por slug, buscar por hostname en url_web
+    // 2. Si no se encontró, buscar por url_web exacta (Vercel)
     if (!tienda && hostname) {
       const { data } = await supabaseAdmin
         .from("tiendas")
@@ -47,20 +55,29 @@ export async function GET(request) {
         .ilike("url_web", `%${hostname}%`)
         .maybeSingle();
       tienda = data;
+      if (tienda) console.log("Encontrada por url_web:", tienda.nombre_negocio);
     }
-
-    // Si aún no se encuentra, buscar por slug parcial
+    
+    // 3. Buscar si el slug está contenido en nombre_negocio (normalizado)
     if (!tienda && slug) {
-      const { data } = await supabaseAdmin
+      const { data: allTiendas } = await supabaseAdmin
         .from("tiendas")
-        .select("*")
-        .ilike("slug", `%${slug}%`)
-        .limit(1)
-        .maybeSingle();
-      tienda = data;
+        .select("*");
+      
+      if (allTiendas) {
+        // Buscar coincidencia exacta del slug en nombre normalizado
+        tienda = allTiendas.find(t => {
+          const nombreNorm = t.nombre_negocio?.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+          const slugNorm = slug.toLowerCase();
+          return nombreNorm === slugNorm || t.slug === slugNorm;
+        });
+        
+        if (tienda) console.log("Encontrada por nombre normalizado:", tienda.nombre_negocio);
+      }
     }
 
     if (!tienda) {
+      console.log("Tienda no encontrada para:", { slug, hostname });
       return NextResponse.json({ 
         found: false, 
         message: "Tienda no encontrada",

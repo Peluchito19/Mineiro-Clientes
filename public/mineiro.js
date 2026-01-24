@@ -110,13 +110,22 @@
      ───────────────────────────────────────────────────────────────────────── */
 
   const getSiteId = () => {
+    // 1. Buscar en data-mineiro-site (prioridad máxima)
     const script = document.querySelector("script[data-mineiro-site]");
     if (script?.dataset.mineiroSite) return script.dataset.mineiroSite;
     
+    // 2. Buscar en meta tag
     const meta = document.querySelector("meta[name='mineiro-site']");
     if (meta?.content) return meta.content;
     
-    return window.location.hostname.replace(/\./g, "-");
+    // 3. Extraer del hostname de Vercel (ej: cosmeticos-fran.vercel.app -> cosmeticos-fran)
+    const hostname = window.location.hostname;
+    if (hostname.endsWith('.vercel.app')) {
+      return hostname.replace('.vercel.app', '');
+    }
+    
+    // 4. Fallback: hostname completo
+    return hostname.replace(/\./g, "-");
   };
 
   const TIENDA_API_URL = "https://mineiro-clientes.vercel.app/api/tienda";
@@ -970,12 +979,49 @@
         }
 
         case "producto": {
-          const producto = productosCache.find(p => p.dom_id === parsed.identifier)
-                        || productosCache.find(p => String(p.id) === parsed.identifier);
+          // Buscar producto por múltiples métodos
+          let producto = productosCache.find(p => p.dom_id === parsed.identifier)
+                      || productosCache.find(p => String(p.id) === parsed.identifier);
+          
+          // Si no encontró, intentar buscar por el contenedor padre del elemento
+          if (!producto && el) {
+            // Buscar el nombre del producto en el contenedor más cercano
+            const container = el.closest('[data-mineiro-bind*="producto-"]') 
+                           || el.closest('.product-card, .producto, [class*="product"], [class*="producto"]')
+                           || el.parentElement?.parentElement;
+            
+            if (container) {
+              // Buscar un elemento con el nombre del producto
+              const nombreEl = container.querySelector('[data-mineiro-bind*=".nombre"]')
+                            || container.querySelector('h1, h2, h3, h4, .product-name, .nombre-producto');
+              
+              if (nombreEl) {
+                const nombreTexto = nombreEl.textContent?.trim().toLowerCase();
+                if (nombreTexto) {
+                  producto = productosCache.find(p => 
+                    p.nombre?.toLowerCase().includes(nombreTexto) || 
+                    nombreTexto.includes(p.nombre?.toLowerCase())
+                  );
+                }
+              }
+            }
+            
+            // Último intento: si el identifier parece un nombre, buscar por nombre
+            if (!producto && parsed.identifier) {
+              const searchName = parsed.identifier.replace(/-/g, ' ').toLowerCase();
+              producto = productosCache.find(p => 
+                p.nombre?.toLowerCase().includes(searchName) ||
+                searchName.includes(p.nombre?.toLowerCase())
+              );
+            }
+          }
           
           if (!producto) {
-            throw new Error("Producto no encontrado");
+            warn("Productos disponibles:", productosCache.map(p => ({ id: p.id, nombre: p.nombre, dom_id: p.dom_id })));
+            throw new Error(`Producto no encontrado: ${parsed.identifier}. Verifica que exista en la base de datos.`);
           }
+
+          log(`Producto encontrado: ${producto.nombre} (id: ${producto.id})`);
 
           // Build update object
           const updateData = {};
@@ -1002,11 +1048,56 @@
         }
 
         case "testimonio": {
-          const testimonio = testimoniosCache.find(t => t.dom_id === parsed.domId);
+          // Buscar testimonio por múltiples métodos
+          let testimonio = testimoniosCache.find(t => t.dom_id === parsed.domId);
+          
+          // Si no encontró, intentar buscar por el contenedor padre
+          if (!testimonio && el) {
+            const container = el.closest('[data-mineiro-bind*="testimonio-"]')
+                           || el.closest('.testimonial, .testimonio, .review, [class*="testimonial"]')
+                           || el.parentElement?.parentElement;
+            
+            if (container) {
+              // Buscar por nombre del autor
+              const nombreEl = container.querySelector('[data-mineiro-bind*=".nombre"]')
+                            || container.querySelector('.author-name, .nombre-autor, .reviewer-name');
+              
+              if (nombreEl) {
+                const nombreTexto = nombreEl.textContent?.trim().toLowerCase();
+                if (nombreTexto) {
+                  testimonio = testimoniosCache.find(t => 
+                    t.nombre?.toLowerCase().includes(nombreTexto) ||
+                    nombreTexto.includes(t.nombre?.toLowerCase())
+                  );
+                }
+              }
+            }
+            
+            // Intentar buscar por nombre en el identifier
+            if (!testimonio && parsed.domId) {
+              const searchName = parsed.domId.replace(/-/g, ' ').toLowerCase();
+              testimonio = testimoniosCache.find(t => 
+                t.nombre?.toLowerCase().includes(searchName) ||
+                searchName.includes(t.nombre?.toLowerCase())
+              );
+            }
+            
+            // Último intento: usar el índice basado en la posición en el DOM
+            if (!testimonio && testimoniosCache.length > 0) {
+              const allTestimonioContainers = document.querySelectorAll('[data-mineiro-bind*="testimonio-"]');
+              const containerIndex = Array.from(allTestimonioContainers).findIndex(c => c.contains(el));
+              if (containerIndex >= 0 && containerIndex < testimoniosCache.length) {
+                testimonio = testimoniosCache[containerIndex];
+              }
+            }
+          }
           
           if (!testimonio) {
-            throw new Error("Testimonio no encontrado");
+            warn("Testimonios disponibles:", testimoniosCache.map(t => ({ id: t.id, nombre: t.nombre, dom_id: t.dom_id })));
+            throw new Error(`Testimonio no encontrado: ${parsed.domId}. Verifica que exista en la base de datos.`);
           }
+
+          log(`Testimonio encontrado: ${testimonio.nombre} (id: ${testimonio.id})`);
 
           apiPayload = {
             action: "update",
@@ -1169,7 +1260,9 @@
       tiendaData = await fetchTienda(siteId);
       
       if (tiendaData) {
-        log("Tienda cargada:", tiendaData.nombre_negocio);
+        log("Tienda cargada:", tiendaData.nombre_negocio, "(id:", tiendaData.id + ")");
+        log("Slug en BD:", tiendaData.slug);
+        log("URL web:", tiendaData.url_web);
 
         // Fetch data in parallel
         const [productos, testimonios] = await Promise.all([
@@ -1181,6 +1274,12 @@
         testimoniosCache = testimonios;
 
         log(`Cargados: ${productos.length} productos, ${testimonios.length} testimonios`);
+        if (productos.length > 0) {
+          log("Productos:", productos.map(p => `${p.nombre} (id:${p.id}, dom_id:${p.dom_id || 'none'})`).join(", "));
+        }
+        if (testimonios.length > 0) {
+          log("Testimonios:", testimonios.map(t => `${t.nombre} (id:${t.id}, dom_id:${t.dom_id || 'none'})`).join(", "));
+        }
 
         // Hydrate elements
         runHydration(tiendaData, productos, testimonios);
