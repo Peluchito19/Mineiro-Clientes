@@ -293,9 +293,74 @@ export default function DashboardClient({
     window.location.href = "/login";
   };
 
+  // Check if URL/slug already exists
+  const [urlCheckStatus, setUrlCheckStatus] = useState(null); // null, 'checking', 'available', 'taken'
+  const [urlOwnerEmail, setUrlOwnerEmail] = useState(null);
+
+  const checkUrlAvailability = async (url) => {
+    if (!url || !supabase) return;
+    
+    setUrlCheckStatus('checking');
+    
+    try {
+      // Extract slug from URL
+      let slug = url;
+      if (url.includes('vercel.app')) {
+        slug = url.replace('https://', '').replace('http://', '').replace('.vercel.app', '').replace(/\//g, '');
+      } else if (url.includes('.')) {
+        slug = url.replace('https://', '').replace('http://', '').split('.')[0].replace(/\//g, '');
+      }
+      slug = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
+      // Check if this URL/slug is already registered
+      const { data: existingTienda } = await supabase
+        .from("tiendas")
+        .select("id, user_id, nombre_negocio, slug, url_web")
+        .or(`slug.eq.${slug},url_web.ilike.%${url}%`)
+        .maybeSingle();
+
+      if (existingTienda) {
+        // Check if it belongs to current user
+        if (existingTienda.user_id === userId) {
+          setUrlCheckStatus('owned');
+          setUrlOwnerEmail(null);
+        } else {
+          setUrlCheckStatus('taken');
+          // Don't reveal owner email for privacy
+          setUrlOwnerEmail('otro usuario');
+        }
+      } else {
+        setUrlCheckStatus('available');
+        setUrlOwnerEmail(null);
+      }
+    } catch (err) {
+      console.error('Error checking URL:', err);
+      setUrlCheckStatus(null);
+    }
+  };
+
+  // Debounced URL check
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (onboardingUrl && onboardingUrl.length > 5) {
+        checkUrlAvailability(onboardingUrl);
+      } else {
+        setUrlCheckStatus(null);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [onboardingUrl]);
+
   // Onboarding: Create first store
   const handleOnboardingComplete = async () => {
     if (!supabase || !onboardingNombre) return;
+    
+    // Don't allow creation if URL is taken by another user
+    if (urlCheckStatus === 'taken') {
+      alert('Esta URL ya está registrada por otro usuario. Por favor usa una URL diferente.');
+      return;
+    }
+    
     setCreatingTienda(true);
 
     const slug = onboardingNombre
@@ -387,11 +452,41 @@ export default function DashboardClient({
                     value={onboardingUrl}
                     onChange={(e) => setOnboardingUrl(e.target.value)}
                     placeholder="https://mi-negocio.vercel.app o https://minegocio.cl"
-                    className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
+                    className={`w-full rounded-xl border bg-slate-950/70 px-4 py-3 text-slate-100 outline-none transition focus:ring-2 ${
+                      urlCheckStatus === 'taken' 
+                        ? 'border-red-500/70 focus:border-red-400/70 focus:ring-red-500/30' 
+                        : urlCheckStatus === 'available' || urlCheckStatus === 'owned'
+                        ? 'border-green-500/70 focus:border-green-400/70 focus:ring-green-500/30'
+                        : 'border-slate-700/70 focus:border-violet-400/70 focus:ring-violet-500/30'
+                    }`}
                   />
-                  <p className="text-xs text-slate-400">
-                    Acepta cualquier URL: Vercel, .cl, .com, etc. Puedes cambiarla después.
-                  </p>
+                  {/* URL status indicator */}
+                  {urlCheckStatus === 'checking' && (
+                    <p className="text-xs text-slate-400 flex items-center gap-2">
+                      <span className="inline-block w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></span>
+                      Verificando disponibilidad...
+                    </p>
+                  )}
+                  {urlCheckStatus === 'available' && (
+                    <p className="text-xs text-green-400 flex items-center gap-2">
+                      ✅ URL disponible - puedes usarla
+                    </p>
+                  )}
+                  {urlCheckStatus === 'owned' && (
+                    <p className="text-xs text-green-400 flex items-center gap-2">
+                      ✅ Ya tienes esta URL registrada
+                    </p>
+                  )}
+                  {urlCheckStatus === 'taken' && (
+                    <p className="text-xs text-red-400 flex items-center gap-2">
+                      ❌ Esta URL ya está registrada por {urlOwnerEmail}. Usa una URL diferente.
+                    </p>
+                  )}
+                  {!urlCheckStatus && (
+                    <p className="text-xs text-slate-400">
+                      Acepta cualquier URL: Vercel, .cl, .com, etc. Puedes cambiarla después.
+                    </p>
+                  )}
                 </div>
 
                 {/* Trial info */}
@@ -411,10 +506,10 @@ export default function DashboardClient({
 
                 <button
                   onClick={handleOnboardingComplete}
-                  disabled={!onboardingNombre || creatingTienda}
+                  disabled={!onboardingNombre || creatingTienda || urlCheckStatus === 'taken' || urlCheckStatus === 'checking'}
                   className="w-full rounded-xl bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500 px-6 py-4 text-lg font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {creatingTienda ? "Creando tu tienda..." : "Comenzar mi prueba gratuita →"}
+                  {creatingTienda ? "Creando tu tienda..." : urlCheckStatus === 'taken' ? "URL no disponible" : "Comenzar mi prueba gratuita →"}
                 </button>
 
                 <p className="text-center text-xs text-slate-400">
@@ -606,22 +701,28 @@ export default function DashboardClient({
                 </div>
               </div>
               <div className="flex flex-col gap-3">
-                <a
-                  href={`/editor/${tiendaSlug}`}
-                  className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-semibold shadow-lg shadow-cyan-500/20 hover:brightness-110 transition"
-                >
-                  🎨 Abrir Editor Visual
-                </a>
-                {tiendaUrl && (
+                {tiendaUrl ? (
                   <a
                     href={`${tiendaUrl}?mineiro-admin`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition"
+                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-semibold shadow-lg shadow-cyan-500/20 hover:brightness-110 transition"
                   >
-                    🔧 Editar en la Web
+                    🎨 Abrir Editor Visual
                   </a>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-700 text-slate-400">
+                    ⚠️ Configura la URL del sitio para habilitar el editor
+                  </div>
                 )}
+                <a
+                  href="https://mineiro-clientes.vercel.app/manual"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition"
+                >
+                  📚 Ver Manual de Usuario
+                </a>
               </div>
             </div>
           </section>

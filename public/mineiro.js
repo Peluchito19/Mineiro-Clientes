@@ -847,6 +847,875 @@
     }
   };
 
+  /* ─────────────────────────────────────────────────────────────────────────
+     PANEL: AÑADIR CONTENIDO (Productos, Categorías, Testimonios)
+     ───────────────────────────────────────────────────────────────────────── */
+
+  const showAddContentPanel = () => {
+    // Remover panel anterior si existe
+    document.querySelector(".mineiro-panel")?.remove();
+
+    // Detectar categorías existentes
+    const existingCategories = [...new Set(productosCache.map(p => p.categoria).filter(Boolean))];
+    
+    // Detectar diseño de tarjetas de producto existentes
+    const existingProductCards = document.querySelectorAll('[data-mineiro-bind*="producto-"]');
+    const cardTemplateInfo = detectCardDesign(existingProductCards);
+
+    const panel = document.createElement("div");
+    panel.className = "mineiro-panel mineiro-add-panel";
+    panel.innerHTML = `
+      <div class="mineiro-panel-header">
+        <h3>➕ Añadir Contenido</h3>
+        <button class="mineiro-panel-close" onclick="this.closest('.mineiro-panel').remove()">✕</button>
+      </div>
+      <div class="mineiro-panel-body">
+        <!-- Tabs -->
+        <div class="mineiro-panel-tabs">
+          <button class="mineiro-panel-tab active" data-tab="producto">📦 Producto</button>
+          <button class="mineiro-panel-tab" data-tab="categoria">📁 Categoría</button>
+          <button class="mineiro-panel-tab" data-tab="testimonio">💬 Testimonio</button>
+        </div>
+
+        <!-- Tab: Producto -->
+        <div class="mineiro-panel-tab-content active" data-content="producto">
+          <div class="mineiro-form-group">
+            <label>Nombre del producto</label>
+            <input type="text" id="add-producto-nombre" placeholder="Ej: Pizza Margherita" />
+          </div>
+          <div class="mineiro-form-group">
+            <label>Precio</label>
+            <input type="number" id="add-producto-precio" placeholder="Ej: 9990" />
+          </div>
+          <div class="mineiro-form-group">
+            <label>Categoría</label>
+            <select id="add-producto-categoria">
+              <option value="">Seleccionar...</option>
+              ${existingCategories.map(c => `<option value="${c}">${c}</option>`).join('')}
+              <option value="__new__">+ Nueva categoría</option>
+            </select>
+            <input type="text" id="add-producto-categoria-nueva" placeholder="Nombre de nueva categoría" style="display:none;margin-top:8px" />
+          </div>
+          <div class="mineiro-form-group">
+            <label>Descripción (opcional)</label>
+            <textarea id="add-producto-descripcion" placeholder="Descripción del producto..."></textarea>
+          </div>
+          <div class="mineiro-form-group">
+            <label>Imagen (opcional)</label>
+            <div class="mineiro-image-drop" id="add-producto-image-drop">
+              <div class="mineiro-drop-hint">📷 Arrastra una imagen o haz clic para seleccionar</div>
+              <input type="file" accept="image/*" style="display:none" />
+            </div>
+          </div>
+          <div class="mineiro-form-info">
+            ${cardTemplateInfo.found 
+              ? `✅ Se detectó el diseño de tarjetas existente. El nuevo producto se adaptará automáticamente.`
+              : `ℹ️ El producto se creará en la base de datos. Agrega un contenedor con data-mineiro-bind para mostrarlo.`
+            }
+          </div>
+          <button class="mineiro-btn-primary" id="add-producto-btn">➕ Crear Producto</button>
+        </div>
+
+        <!-- Tab: Categoría -->
+        <div class="mineiro-panel-tab-content" data-content="categoria">
+          <div class="mineiro-form-group">
+            <label>Nombre de la categoría</label>
+            <input type="text" id="add-categoria-nombre" placeholder="Ej: Pizzas, Bebidas, Postres..." />
+          </div>
+          <div class="mineiro-form-group">
+            <label>Descripción (opcional)</label>
+            <textarea id="add-categoria-descripcion" placeholder="Descripción de la categoría..."></textarea>
+          </div>
+          <button class="mineiro-btn-primary" id="add-categoria-btn">📁 Crear Categoría</button>
+          <div class="mineiro-form-info" style="margin-top:16px">
+            <strong>Categorías existentes:</strong><br>
+            ${existingCategories.length > 0 
+              ? existingCategories.map(c => `<span class="mineiro-tag">${c}</span>`).join(' ')
+              : '<em>No hay categorías aún</em>'
+            }
+          </div>
+        </div>
+
+        <!-- Tab: Testimonio -->
+        <div class="mineiro-panel-tab-content" data-content="testimonio">
+          <div class="mineiro-form-group">
+            <label>Nombre del cliente</label>
+            <input type="text" id="add-testimonio-nombre" placeholder="Ej: María García" />
+          </div>
+          <div class="mineiro-form-group">
+            <label>Testimonio</label>
+            <textarea id="add-testimonio-texto" placeholder="El comentario del cliente..."></textarea>
+          </div>
+          <div class="mineiro-form-group">
+            <label>Calificación</label>
+            <select id="add-testimonio-rating">
+              <option value="5">⭐⭐⭐⭐⭐ (5 estrellas)</option>
+              <option value="4">⭐⭐⭐⭐ (4 estrellas)</option>
+              <option value="3">⭐⭐⭐ (3 estrellas)</option>
+              <option value="2">⭐⭐ (2 estrellas)</option>
+              <option value="1">⭐ (1 estrella)</option>
+            </select>
+          </div>
+          <div class="mineiro-form-group">
+            <label>Avatar (opcional)</label>
+            <div class="mineiro-image-drop" id="add-testimonio-image-drop">
+              <div class="mineiro-drop-hint">📷 Arrastra una imagen o haz clic</div>
+              <input type="file" accept="image/*" style="display:none" />
+            </div>
+          </div>
+          <button class="mineiro-btn-primary" id="add-testimonio-btn">💬 Crear Testimonio</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+
+    // Setup tabs
+    panel.querySelectorAll('.mineiro-panel-tab').forEach(tab => {
+      tab.onclick = () => {
+        panel.querySelectorAll('.mineiro-panel-tab').forEach(t => t.classList.remove('active'));
+        panel.querySelectorAll('.mineiro-panel-tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        panel.querySelector(`[data-content="${tab.dataset.tab}"]`).classList.add('active');
+      };
+    });
+
+    // Nueva categoría select
+    const catSelect = document.getElementById('add-producto-categoria');
+    const catNueva = document.getElementById('add-producto-categoria-nueva');
+    catSelect.onchange = () => {
+      catNueva.style.display = catSelect.value === '__new__' ? 'block' : 'none';
+    };
+
+    // Image drops
+    setupImageDrop('add-producto-image-drop');
+    setupImageDrop('add-testimonio-image-drop');
+
+    // Buttons
+    document.getElementById('add-producto-btn').onclick = createNewProduct;
+    document.getElementById('add-categoria-btn').onclick = createNewCategory;
+    document.getElementById('add-testimonio-btn').onclick = createNewTestimonio;
+  };
+
+  const setupImageDrop = (dropId) => {
+    const drop = document.getElementById(dropId);
+    if (!drop) return;
+    
+    const input = drop.querySelector('input[type="file"]');
+    
+    drop.onclick = () => input.click();
+    
+    drop.ondragover = (e) => {
+      e.preventDefault();
+      drop.classList.add('dragover');
+    };
+    
+    drop.ondragleave = () => drop.classList.remove('dragover');
+    
+    drop.ondrop = async (e) => {
+      e.preventDefault();
+      drop.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) await handleImageDropFile(drop, file);
+    };
+    
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (file) await handleImageDropFile(drop, file);
+    };
+  };
+
+  const handleImageDropFile = async (drop, file) => {
+    drop.innerHTML = '<div class="mineiro-drop-hint"><div class="mineiro-spinner"></div> Subiendo...</div>';
+    
+    try {
+      const url = await uploadImageToStorage(file);
+      drop.innerHTML = `<img src="${url}" alt="Preview" style="max-width:100%;max-height:100px;border-radius:8px" />`;
+      drop.dataset.imageUrl = url;
+    } catch (err) {
+      // Fallback a base64
+      try {
+        const base64 = await fileToBase64(file);
+        drop.innerHTML = `<img src="${base64}" alt="Preview" style="max-width:100%;max-height:100px;border-radius:8px" />`;
+        drop.dataset.imageUrl = base64;
+      } catch (err2) {
+        drop.innerHTML = `<div class="mineiro-drop-hint">❌ Error: ${err.message}</div>`;
+      }
+    }
+  };
+
+  const detectCardDesign = (existingCards) => {
+    if (existingCards.length === 0) {
+      return { found: false, template: null };
+    }
+    
+    // Analizar la primera tarjeta para detectar el patrón
+    const firstCard = existingCards[0].closest('[class*="card"], [class*="product"], [class*="item"], .producto, .menu-item') 
+                   || existingCards[0].parentElement?.parentElement;
+    
+    if (!firstCard) return { found: false, template: null };
+    
+    return {
+      found: true,
+      template: {
+        className: firstCard.className,
+        tagName: firstCard.tagName.toLowerCase(),
+        hasImage: !!firstCard.querySelector('img'),
+        hasPrice: !!firstCard.querySelector('[data-mineiro-bind*="precio"]'),
+        hasDescription: !!firstCard.querySelector('[data-mineiro-bind*="descripcion"]'),
+      }
+    };
+  };
+
+  const createNewProduct = async () => {
+    const nombre = document.getElementById('add-producto-nombre').value.trim();
+    const precio = parseFloat(document.getElementById('add-producto-precio').value) || 0;
+    const catSelect = document.getElementById('add-producto-categoria');
+    const catNueva = document.getElementById('add-producto-categoria-nueva').value.trim();
+    const descripcion = document.getElementById('add-producto-descripcion').value.trim();
+    const imageDrop = document.getElementById('add-producto-image-drop');
+    const imagenUrl = imageDrop?.dataset?.imageUrl || '';
+
+    let categoria = catSelect.value === '__new__' ? catNueva : catSelect.value;
+
+    if (!nombre) {
+      alert('El nombre del producto es requerido');
+      return;
+    }
+
+    if (!tiendaData?.id) {
+      alert('Error: Tienda no configurada');
+      return;
+    }
+
+    const btn = document.getElementById('add-producto-btn');
+    btn.innerHTML = '<div class="mineiro-spinner"></div> Creando...';
+    btn.disabled = true;
+
+    try {
+      // Generar dom_id único
+      const domId = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+      const response = await fetch(EDIT_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upsert',
+          table: 'productos',
+          data: {
+            tienda_id: tiendaData.id,
+            nombre,
+            precio,
+            categoria: categoria || null,
+            descripcion: descripcion || null,
+            imagen_url: imagenUrl || null,
+            dom_id: domId,
+            visible: true
+          },
+          where: { tienda_id: tiendaData.id, dom_id: domId }
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Agregar al cache local
+        if (result.data) {
+          productosCache.push(result.data);
+        }
+        
+        btn.innerHTML = '✅ ¡Producto creado!';
+        btn.style.background = '#22c55e';
+        
+        // Limpiar form
+        setTimeout(() => {
+          document.getElementById('add-producto-nombre').value = '';
+          document.getElementById('add-producto-precio').value = '';
+          document.getElementById('add-producto-descripcion').value = '';
+          document.getElementById('add-producto-categoria').value = '';
+          imageDrop.innerHTML = '<div class="mineiro-drop-hint">📷 Arrastra una imagen o haz clic para seleccionar</div><input type="file" accept="image/*" style="display:none" />';
+          imageDrop.dataset.imageUrl = '';
+          setupImageDrop('add-producto-image-drop');
+          
+          btn.innerHTML = '➕ Crear Producto';
+          btn.style.background = '';
+          btn.disabled = false;
+        }, 1500);
+        
+        log(`✓ Producto creado: ${nombre}`);
+      } else {
+        throw new Error(result.error || 'Error al crear producto');
+      }
+    } catch (err) {
+      warn('Error al crear producto:', err.message);
+      btn.innerHTML = '❌ Error';
+      btn.style.background = '#ef4444';
+      setTimeout(() => {
+        btn.innerHTML = '➕ Crear Producto';
+        btn.style.background = '';
+        btn.disabled = false;
+      }, 2000);
+    }
+  };
+
+  const createNewCategory = async () => {
+    const nombre = document.getElementById('add-categoria-nombre').value.trim();
+    const descripcion = document.getElementById('add-categoria-descripcion').value.trim();
+
+    if (!nombre) {
+      alert('El nombre de la categoría es requerido');
+      return;
+    }
+
+    if (!tiendaData?.id) {
+      alert('Error: Tienda no configurada');
+      return;
+    }
+
+    const btn = document.getElementById('add-categoria-btn');
+    btn.innerHTML = '<div class="mineiro-spinner"></div> Creando...';
+    btn.disabled = true;
+
+    try {
+      // Guardar categoría en site_config
+      const siteConfig = JSON.parse(JSON.stringify(tiendaData.site_config || {}));
+      if (!siteConfig.categorias) siteConfig.categorias = [];
+      
+      if (!siteConfig.categorias.find(c => c.nombre === nombre)) {
+        siteConfig.categorias.push({ nombre, descripcion, orden: siteConfig.categorias.length });
+      }
+
+      const response = await fetch(EDIT_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update',
+          table: 'tiendas',
+          data: { site_config: siteConfig },
+          where: { id: tiendaData.id }
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        tiendaData.site_config = siteConfig;
+        
+        btn.innerHTML = '✅ ¡Categoría creada!';
+        btn.style.background = '#22c55e';
+        
+        setTimeout(() => {
+          // Refrescar el panel para mostrar la nueva categoría
+          showAddContentPanel();
+        }, 1500);
+        
+        log(`✓ Categoría creada: ${nombre}`);
+      } else {
+        throw new Error(result.error || 'Error al crear categoría');
+      }
+    } catch (err) {
+      warn('Error al crear categoría:', err.message);
+      btn.innerHTML = '❌ Error';
+      btn.style.background = '#ef4444';
+      setTimeout(() => {
+        btn.innerHTML = '📁 Crear Categoría';
+        btn.style.background = '';
+        btn.disabled = false;
+      }, 2000);
+    }
+  };
+
+  const createNewTestimonio = async () => {
+    const nombre = document.getElementById('add-testimonio-nombre').value.trim();
+    const texto = document.getElementById('add-testimonio-texto').value.trim();
+    const rating = parseInt(document.getElementById('add-testimonio-rating').value) || 5;
+    const imageDrop = document.getElementById('add-testimonio-image-drop');
+    const avatar = imageDrop?.dataset?.imageUrl || '';
+
+    if (!nombre || !texto) {
+      alert('El nombre y el testimonio son requeridos');
+      return;
+    }
+
+    if (!tiendaData?.id) {
+      alert('Error: Tienda no configurada');
+      return;
+    }
+
+    const btn = document.getElementById('add-testimonio-btn');
+    btn.innerHTML = '<div class="mineiro-spinner"></div> Creando...';
+    btn.disabled = true;
+
+    try {
+      const domId = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+      const response = await fetch(EDIT_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upsert',
+          table: 'testimonios',
+          data: {
+            tienda_id: tiendaData.id,
+            nombre,
+            texto,
+            estrellas: rating,
+            avatar: avatar || null,
+            dom_id: domId,
+            visible: true,
+            orden: testimoniosCache.length
+          },
+          where: { tienda_id: tiendaData.id, dom_id: domId }
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        if (result.data) {
+          testimoniosCache.push(result.data);
+        }
+        
+        btn.innerHTML = '✅ ¡Testimonio creado!';
+        btn.style.background = '#22c55e';
+        
+        setTimeout(() => {
+          document.getElementById('add-testimonio-nombre').value = '';
+          document.getElementById('add-testimonio-texto').value = '';
+          document.getElementById('add-testimonio-rating').value = '5';
+          imageDrop.innerHTML = '<div class="mineiro-drop-hint">📷 Arrastra una imagen o haz clic</div><input type="file" accept="image/*" style="display:none" />';
+          imageDrop.dataset.imageUrl = '';
+          setupImageDrop('add-testimonio-image-drop');
+          
+          btn.innerHTML = '💬 Crear Testimonio';
+          btn.style.background = '';
+          btn.disabled = false;
+        }, 1500);
+        
+        log(`✓ Testimonio creado: ${nombre}`);
+      } else {
+        throw new Error(result.error || 'Error al crear testimonio');
+      }
+    } catch (err) {
+      warn('Error al crear testimonio:', err.message);
+      btn.innerHTML = '❌ Error';
+      btn.style.background = '#ef4444';
+      setTimeout(() => {
+        btn.innerHTML = '💬 Crear Testimonio';
+        btn.style.background = '';
+        btn.disabled = false;
+      }, 2000);
+    }
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     PANEL: CONFIGURACIÓN DE USUARIO
+     ───────────────────────────────────────────────────────────────────────── */
+
+  const showSettingsPanel = () => {
+    document.querySelector(".mineiro-panel")?.remove();
+
+    const panel = document.createElement("div");
+    panel.className = "mineiro-panel mineiro-settings-panel";
+    panel.innerHTML = `
+      <div class="mineiro-panel-header">
+        <h3>⚙️ Configuración</h3>
+        <button class="mineiro-panel-close" onclick="this.closest('.mineiro-panel').remove()">✕</button>
+      </div>
+      <div class="mineiro-panel-body">
+        <!-- Info de la tienda -->
+        <div class="mineiro-settings-section">
+          <h4>🏪 Información de la Tienda</h4>
+          <div class="mineiro-form-group">
+            <label>Nombre del negocio</label>
+            <input type="text" id="settings-tienda-nombre" value="${tiendaData?.nombre_negocio || ''}" />
+          </div>
+          <div class="mineiro-form-group">
+            <label>URL del sitio</label>
+            <input type="text" id="settings-tienda-url" value="${tiendaData?.url_web || ''}" readonly />
+          </div>
+          <div class="mineiro-form-group">
+            <label>Slug (identificador)</label>
+            <input type="text" id="settings-tienda-slug" value="${tiendaData?.slug || ''}" readonly />
+          </div>
+          <button class="mineiro-btn-primary" id="settings-save-tienda">💾 Guardar Cambios</button>
+        </div>
+
+        <!-- Cuenta de usuario -->
+        <div class="mineiro-settings-section">
+          <h4>👤 Cuenta de Usuario</h4>
+          <div class="mineiro-form-group">
+            <label>Email actual</label>
+            <input type="email" id="settings-user-email" placeholder="tu@email.com" />
+          </div>
+          <button class="mineiro-btn-secondary" id="settings-change-email">📧 Cambiar Email</button>
+        </div>
+
+        <div class="mineiro-settings-section">
+          <h4>🔐 Contraseña</h4>
+          <div class="mineiro-form-group">
+            <label>Nueva contraseña</label>
+            <div class="mineiro-password-field">
+              <input type="password" id="settings-new-password" placeholder="Nueva contraseña" />
+              <button type="button" class="mineiro-toggle-password" data-target="settings-new-password">👁️</button>
+            </div>
+          </div>
+          <div class="mineiro-form-group">
+            <label>Confirmar contraseña</label>
+            <div class="mineiro-password-field">
+              <input type="password" id="settings-confirm-password" placeholder="Confirmar contraseña" />
+              <button type="button" class="mineiro-toggle-password" data-target="settings-confirm-password">👁️</button>
+            </div>
+          </div>
+          <button class="mineiro-btn-secondary" id="settings-change-password">🔑 Cambiar Contraseña</button>
+          <button class="mineiro-btn-link" id="settings-forgot-password">¿Olvidaste tu contraseña?</button>
+        </div>
+
+        <!-- Manual de uso -->
+        <div class="mineiro-settings-section">
+          <h4>📖 Ayuda</h4>
+          <button class="mineiro-btn-secondary" id="settings-open-manual">📚 Ver Manual de Usuario</button>
+          <button class="mineiro-btn-secondary" id="settings-open-snippets">💻 Ver Snippets de Código</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+
+    // Load user email from Supabase
+    loadUserEmail();
+
+    // Toggle password visibility
+    panel.querySelectorAll('.mineiro-toggle-password').forEach(btn => {
+      btn.onclick = () => {
+        const input = document.getElementById(btn.dataset.target);
+        input.type = input.type === 'password' ? 'text' : 'password';
+        btn.textContent = input.type === 'password' ? '👁️' : '🙈';
+      };
+    });
+
+    // Event handlers
+    document.getElementById('settings-save-tienda').onclick = saveStoreSettings;
+    document.getElementById('settings-change-email').onclick = changeUserEmail;
+    document.getElementById('settings-change-password').onclick = changeUserPassword;
+    document.getElementById('settings-forgot-password').onclick = resetPassword;
+    document.getElementById('settings-open-manual').onclick = showUserManual;
+    document.getElementById('settings-open-snippets').onclick = showCodeSnippets;
+  };
+
+  const loadUserEmail = async () => {
+    if (!supabase) return;
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.email) {
+        document.getElementById('settings-user-email').value = user.email;
+      }
+    } catch (err) {
+      log('No se pudo cargar email de usuario');
+    }
+  };
+
+  const saveStoreSettings = async () => {
+    const nombre = document.getElementById('settings-tienda-nombre').value.trim();
+    const btn = document.getElementById('settings-save-tienda');
+    
+    if (!nombre || !tiendaData?.id) return;
+
+    btn.innerHTML = '<div class="mineiro-spinner"></div> Guardando...';
+    btn.disabled = true;
+
+    try {
+      const response = await fetch(EDIT_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update',
+          table: 'tiendas',
+          data: { nombre_negocio: nombre },
+          where: { id: tiendaData.id }
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        tiendaData.nombre_negocio = nombre;
+        btn.innerHTML = '✅ Guardado';
+        btn.style.background = '#22c55e';
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err) {
+      btn.innerHTML = '❌ Error';
+      btn.style.background = '#ef4444';
+    }
+    
+    setTimeout(() => {
+      btn.innerHTML = '💾 Guardar Cambios';
+      btn.style.background = '';
+      btn.disabled = false;
+    }, 2000);
+  };
+
+  const changeUserEmail = async () => {
+    const newEmail = document.getElementById('settings-user-email').value.trim();
+    
+    if (!newEmail || !supabase) {
+      alert('Ingresa un email válido');
+      return;
+    }
+
+    const btn = document.getElementById('settings-change-email');
+    btn.innerHTML = '<div class="mineiro-spinner"></div>';
+    btn.disabled = true;
+
+    try {
+      const { error } = await supabase.auth.updateUser({ email: newEmail });
+      
+      if (error) throw error;
+      
+      alert('Se ha enviado un email de confirmación a tu nueva dirección');
+      btn.innerHTML = '✅ Email enviado';
+    } catch (err) {
+      alert('Error: ' + err.message);
+      btn.innerHTML = '❌ Error';
+    }
+    
+    setTimeout(() => {
+      btn.innerHTML = '📧 Cambiar Email';
+      btn.disabled = false;
+    }, 2000);
+  };
+
+  const changeUserPassword = async () => {
+    const newPass = document.getElementById('settings-new-password').value;
+    const confirmPass = document.getElementById('settings-confirm-password').value;
+
+    if (!newPass || newPass.length < 6) {
+      alert('La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+
+    if (newPass !== confirmPass) {
+      alert('Las contraseñas no coinciden');
+      return;
+    }
+
+    if (!supabase) return;
+
+    const btn = document.getElementById('settings-change-password');
+    btn.innerHTML = '<div class="mineiro-spinner"></div>';
+    btn.disabled = true;
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPass });
+      
+      if (error) throw error;
+      
+      alert('Contraseña actualizada exitosamente');
+      document.getElementById('settings-new-password').value = '';
+      document.getElementById('settings-confirm-password').value = '';
+      btn.innerHTML = '✅ Actualizada';
+    } catch (err) {
+      alert('Error: ' + err.message);
+      btn.innerHTML = '❌ Error';
+    }
+    
+    setTimeout(() => {
+      btn.innerHTML = '🔑 Cambiar Contraseña';
+      btn.disabled = false;
+    }, 2000);
+  };
+
+  const resetPassword = async () => {
+    const email = document.getElementById('settings-user-email').value.trim();
+    
+    if (!email || !supabase) {
+      alert('Ingresa tu email para recuperar la contraseña');
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + '/login?reset=true'
+      });
+      
+      if (error) throw error;
+      
+      alert('Se ha enviado un email con instrucciones para restablecer tu contraseña');
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     MANUAL DE USUARIO Y SNIPPETS
+     ───────────────────────────────────────────────────────────────────────── */
+
+  const showUserManual = () => {
+    document.querySelector(".mineiro-panel")?.remove();
+
+    const panel = document.createElement("div");
+    panel.className = "mineiro-panel mineiro-manual-panel";
+    panel.style.maxWidth = "800px";
+    panel.innerHTML = `
+      <div class="mineiro-panel-header">
+        <h3>📚 Manual de Usuario - Mineiro Editor</h3>
+        <button class="mineiro-panel-close" onclick="this.closest('.mineiro-panel').remove()">✕</button>
+      </div>
+      <div class="mineiro-panel-body mineiro-manual-content">
+        <h4>🚀 Inicio Rápido</h4>
+        <ol>
+          <li><strong>Activar modo edición:</strong> Agrega <code>?mineiro-admin</code> a la URL de tu sitio</li>
+          <li><strong>Editar contenido:</strong> Haz clic en cualquier elemento con borde punteado</li>
+          <li><strong>Guardar cambios:</strong> Clic en "Guardar" o presiona Enter</li>
+          <li><strong>Deshacer:</strong> Usa Ctrl+Z o el botón "Deshacer"</li>
+        </ol>
+
+        <h4>✏️ Edición de Texto</h4>
+        <ul>
+          <li><strong>Formato de texto:</strong> Usa la barra de herramientas para negrita (B), cursiva (I), subrayado (U)</li>
+          <li><strong>Estilos por palabra:</strong> Selecciona texto específico y aplica formato solo a esa selección</li>
+          <li><strong>Restaurar original:</strong> Selecciona "Original" en estilos para volver al texto del código HTML</li>
+        </ul>
+
+        <h4>🖼️ Imágenes</h4>
+        <ul>
+          <li><strong>Subir imagen:</strong> Arrastra y suelta o haz clic para seleccionar archivo</li>
+          <li><strong>URL externa:</strong> También puedes pegar una URL de imagen</li>
+          <li><strong>Formatos soportados:</strong> JPG, PNG, GIF, WebP</li>
+        </ul>
+
+        <h4>➕ Añadir Contenido</h4>
+        <ul>
+          <li><strong>Productos:</strong> Usa el botón "Añadir" → "Producto" para crear nuevos items</li>
+          <li><strong>Categorías:</strong> Organiza tus productos en categorías desde el panel</li>
+          <li><strong>Testimonios:</strong> Agrega reseñas de clientes con foto y calificación</li>
+        </ul>
+
+        <h4>⌨️ Atajos de Teclado</h4>
+        <table class="mineiro-shortcuts-table">
+          <tr><td><code>Ctrl+Z</code></td><td>Deshacer último cambio</td></tr>
+          <tr><td><code>Escape</code></td><td>Cerrar popup de edición</td></tr>
+          <tr><td><code>Enter</code></td><td>Guardar cambio (en campos de texto)</td></tr>
+          <tr><td><code>Ctrl+B</code></td><td>Negrita (en editor de texto)</td></tr>
+          <tr><td><code>Ctrl+I</code></td><td>Cursiva (en editor de texto)</td></tr>
+          <tr><td><code>Ctrl+U</code></td><td>Subrayado (en editor de texto)</td></tr>
+        </table>
+
+        <h4>💡 Tips</h4>
+        <ul>
+          <li>Los cambios se guardan automáticamente en la base de datos</li>
+          <li>Puedes ocultar la barra de edición mientras trabajas</li>
+          <li>Usa el panel de configuración para cambiar datos de tu cuenta</li>
+          <li>Los productos nuevos se sincronizan automáticamente con tu sitio</li>
+        </ul>
+      </div>
+    `;
+    document.body.appendChild(panel);
+  };
+
+  const showCodeSnippets = () => {
+    document.querySelector(".mineiro-panel")?.remove();
+
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://mineiro-clientes.vercel.app';
+    const slug = tiendaData?.slug || 'tu-sitio';
+
+    const panel = document.createElement("div");
+    panel.className = "mineiro-panel mineiro-snippets-panel";
+    panel.style.maxWidth = "900px";
+    panel.innerHTML = `
+      <div class="mineiro-panel-header">
+        <h3>💻 Snippets de Código</h3>
+        <button class="mineiro-panel-close" onclick="this.closest('.mineiro-panel').remove()">✕</button>
+      </div>
+      <div class="mineiro-panel-body">
+        <h4>📦 Script Principal</h4>
+        <p>Agrega este script antes de cerrar <code>&lt;/body&gt;</code>:</p>
+        <div class="mineiro-code-block">
+          <button class="mineiro-copy-btn" onclick="copySnippet(this)">📋 Copiar</button>
+          <pre>&lt;script src="${baseUrl}/mineiro.js" data-mineiro-site="${slug}"&gt;&lt;/script&gt;</pre>
+        </div>
+
+        <h4>🏪 Datos de la Tienda</h4>
+        <div class="mineiro-code-block">
+          <button class="mineiro-copy-btn" onclick="copySnippet(this)">📋 Copiar</button>
+          <pre>&lt;!-- Nombre del negocio --&gt;
+&lt;h1 data-mineiro-bind="config-tienda.nombre_tienda"&gt;Mi Negocio&lt;/h1&gt;
+
+&lt;!-- Logo --&gt;
+&lt;img data-mineiro-bind="config-tienda.logo_url" src="logo.png" alt="Logo"&gt;</pre>
+        </div>
+
+        <h4>🦸 Hero Section</h4>
+        <div class="mineiro-code-block">
+          <button class="mineiro-copy-btn" onclick="copySnippet(this)">📋 Copiar</button>
+          <pre>&lt;section class="hero"&gt;
+  &lt;h1 data-mineiro-bind="hero.titulo"&gt;Bienvenidos&lt;/h1&gt;
+  &lt;p data-mineiro-bind="hero.subtitulo"&gt;La mejor experiencia&lt;/p&gt;
+  &lt;div data-mineiro-bind="hero.imagen_fondo" style="background-image:url('hero.jpg')"&gt;&lt;/div&gt;
+&lt;/section&gt;</pre>
+        </div>
+
+        <h4>📦 Productos</h4>
+        <div class="mineiro-code-block">
+          <button class="mineiro-copy-btn" onclick="copySnippet(this)">📋 Copiar</button>
+          <pre>&lt;!-- Usa un ID único para cada producto (dom_id en la BD) --&gt;
+&lt;div class="product-card"&gt;
+  &lt;img data-mineiro-bind="producto-pizza-margherita.imagen_url" src="pizza.jpg"&gt;
+  &lt;h3 data-mineiro-bind="producto-pizza-margherita.nombre"&gt;Pizza Margherita&lt;/h3&gt;
+  &lt;p data-mineiro-bind="producto-pizza-margherita.descripcion"&gt;Descripción&lt;/p&gt;
+  &lt;span data-mineiro-bind="producto-pizza-margherita.precio"&gt;$9.990&lt;/span&gt;
+&lt;/div&gt;</pre>
+        </div>
+
+        <h4>💬 Testimonios</h4>
+        <div class="mineiro-code-block">
+          <button class="mineiro-copy-btn" onclick="copySnippet(this)">📋 Copiar</button>
+          <pre>&lt;div class="testimonial"&gt;
+  &lt;img data-mineiro-bind="testimonio-cliente1.avatar" src="avatar.jpg"&gt;
+  &lt;p data-mineiro-bind="testimonio-cliente1.texto"&gt;Excelente servicio&lt;/p&gt;
+  &lt;strong data-mineiro-bind="testimonio-cliente1.nombre"&gt;Juan Pérez&lt;/strong&gt;
+  &lt;span data-mineiro-bind="testimonio-cliente1.estrellas"&gt;⭐⭐⭐⭐⭐&lt;/span&gt;
+&lt;/div&gt;</pre>
+        </div>
+
+        <h4>📋 Footer</h4>
+        <div class="mineiro-code-block">
+          <button class="mineiro-copy-btn" onclick="copySnippet(this)">📋 Copiar</button>
+          <pre>&lt;footer&gt;
+  &lt;p data-mineiro-bind="footer.descripcion"&gt;Texto del footer&lt;/p&gt;
+  &lt;a data-mineiro-bind="footer.telefono" href="tel:+56912345678"&gt;+56 9 1234 5678&lt;/a&gt;
+  &lt;a data-mineiro-bind="footer.email" href="mailto:info@ejemplo.com"&gt;info@ejemplo.com&lt;/a&gt;
+&lt;/footer&gt;</pre>
+        </div>
+
+        <h4>📖 Atributos Disponibles</h4>
+        <table class="mineiro-attributes-table">
+          <thead>
+            <tr><th>Prefijo</th><th>Uso</th><th>Ejemplo</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>config-tienda.</code></td><td>Datos de la tienda</td><td><code>config-tienda.nombre_tienda</code></td></tr>
+            <tr><td><code>hero.</code></td><td>Sección hero</td><td><code>hero.titulo</code></td></tr>
+            <tr><td><code>footer.</code></td><td>Pie de página</td><td><code>footer.telefono</code></td></tr>
+            <tr><td><code>producto-{id}.</code></td><td>Producto específico</td><td><code>producto-pizza.nombre</code></td></tr>
+            <tr><td><code>testimonio-{id}.</code></td><td>Testimonio específico</td><td><code>testimonio-juan.texto</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+    document.body.appendChild(panel);
+
+    // Función global para copiar
+    window.copySnippet = (btn) => {
+      const code = btn.nextElementSibling.textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = '✅ Copiado!';
+        setTimeout(() => btn.textContent = '📋 Copiar', 2000);
+      });
+    };
+  };
+
   // Subir imagen a Supabase Storage
   const uploadImageToStorage = async (file) => {
     if (!supabase) {
@@ -1391,6 +2260,362 @@
       @keyframes mineiro-spin {
         to { transform: rotate(360deg); }
       }
+      
+      /* Paneles flotantes */
+      .mineiro-panel {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border: 2px solid #475569;
+        border-radius: 20px;
+        padding: 0;
+        max-width: 500px;
+        width: 90%;
+        max-height: 85vh;
+        overflow: hidden;
+        box-shadow: 0 25px 80px rgba(0,0,0,0.7);
+        z-index: 999999999;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      .mineiro-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid #334155;
+        background: #0f172a;
+      }
+      .mineiro-panel-header h3 {
+        margin: 0;
+        color: #f1f5f9;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .mineiro-panel-close {
+        background: none;
+        border: none;
+        color: #64748b;
+        font-size: 20px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 6px;
+        transition: all 0.15s;
+      }
+      .mineiro-panel-close:hover {
+        color: #ef4444;
+        background: rgba(239,68,68,0.1);
+      }
+      .mineiro-panel-body {
+        padding: 20px;
+        overflow-y: auto;
+        max-height: calc(85vh - 80px);
+      }
+      
+      /* Tabs del panel */
+      .mineiro-panel-tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 20px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #334155;
+      }
+      .mineiro-panel-tab {
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid #475569;
+        background: transparent;
+        color: #94a3b8;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .mineiro-panel-tab:hover {
+        background: #334155;
+        color: #e2e8f0;
+      }
+      .mineiro-panel-tab.active {
+        background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+        border-color: transparent;
+        color: white;
+      }
+      .mineiro-panel-tab-content {
+        display: none;
+      }
+      .mineiro-panel-tab-content.active {
+        display: block;
+      }
+      
+      /* Form groups */
+      .mineiro-form-group {
+        margin-bottom: 16px;
+      }
+      .mineiro-form-group label {
+        display: block;
+        font-size: 12px;
+        color: #94a3b8;
+        font-weight: 500;
+        margin-bottom: 6px;
+      }
+      .mineiro-form-group input,
+      .mineiro-form-group textarea,
+      .mineiro-form-group select {
+        width: 100%;
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 2px solid #475569;
+        background: #0f172a;
+        color: #f1f5f9;
+        font-size: 14px;
+        transition: border-color 0.2s;
+        font-family: inherit;
+      }
+      .mineiro-form-group input:focus,
+      .mineiro-form-group textarea:focus,
+      .mineiro-form-group select:focus {
+        outline: none;
+        border-color: #06b6d4;
+      }
+      .mineiro-form-group textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+      .mineiro-form-info {
+        padding: 12px;
+        background: #334155;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #94a3b8;
+        margin-bottom: 16px;
+      }
+      
+      /* Image drop zone */
+      .mineiro-image-drop {
+        width: 100%;
+        height: 100px;
+        border: 2px dashed #475569;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        background: #0f172a;
+      }
+      .mineiro-image-drop:hover {
+        border-color: #06b6d4;
+        background: #1e293b;
+      }
+      .mineiro-image-drop.dragover {
+        border-color: #10b981;
+        background: rgba(16,185,129,0.1);
+      }
+      .mineiro-drop-hint {
+        color: #64748b;
+        font-size: 13px;
+        text-align: center;
+      }
+      
+      /* Buttons */
+      .mineiro-btn-primary {
+        width: 100%;
+        padding: 12px 20px;
+        border-radius: 10px;
+        border: none;
+        background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+        color: white;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+      .mineiro-btn-primary:hover {
+        filter: brightness(1.1);
+        transform: translateY(-1px);
+      }
+      .mineiro-btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+      .mineiro-btn-secondary {
+        width: 100%;
+        padding: 10px 16px;
+        border-radius: 8px;
+        border: 1px solid #475569;
+        background: #334155;
+        color: #e2e8f0;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+      .mineiro-btn-secondary:hover {
+        background: #475569;
+      }
+      .mineiro-btn-link {
+        background: none;
+        border: none;
+        color: #06b6d4;
+        font-size: 13px;
+        cursor: pointer;
+        text-decoration: underline;
+        padding: 8px 0;
+        width: 100%;
+        text-align: center;
+      }
+      .mineiro-btn-link:hover {
+        color: #22d3ee;
+      }
+      
+      /* Tags */
+      .mineiro-tag {
+        display: inline-block;
+        padding: 4px 10px;
+        background: #334155;
+        border-radius: 6px;
+        font-size: 12px;
+        color: #e2e8f0;
+        margin: 2px;
+      }
+      
+      /* Settings sections */
+      .mineiro-settings-section {
+        padding: 16px 0;
+        border-bottom: 1px solid #334155;
+      }
+      .mineiro-settings-section:last-child {
+        border-bottom: none;
+      }
+      .mineiro-settings-section h4 {
+        margin: 0 0 12px 0;
+        color: #f1f5f9;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .mineiro-password-field {
+        position: relative;
+      }
+      .mineiro-password-field input {
+        padding-right: 50px;
+      }
+      .mineiro-toggle-password {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: #64748b;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      
+      /* Manual content */
+      .mineiro-manual-content {
+        font-size: 14px;
+        color: #e2e8f0;
+        line-height: 1.6;
+      }
+      .mineiro-manual-content h4 {
+        color: #06b6d4;
+        margin: 20px 0 10px;
+        font-size: 16px;
+      }
+      .mineiro-manual-content h4:first-child {
+        margin-top: 0;
+      }
+      .mineiro-manual-content ul, .mineiro-manual-content ol {
+        padding-left: 20px;
+        margin: 10px 0;
+      }
+      .mineiro-manual-content li {
+        margin: 6px 0;
+      }
+      .mineiro-manual-content code {
+        background: #334155;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+        color: #f59e0b;
+      }
+      .mineiro-shortcuts-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0;
+      }
+      .mineiro-shortcuts-table td {
+        padding: 8px 12px;
+        border-bottom: 1px solid #334155;
+      }
+      .mineiro-shortcuts-table td:first-child {
+        width: 120px;
+      }
+      
+      /* Code snippets */
+      .mineiro-code-block {
+        position: relative;
+        background: #0f172a;
+        border-radius: 10px;
+        margin: 10px 0;
+        overflow: hidden;
+      }
+      .mineiro-code-block pre {
+        padding: 16px;
+        margin: 0;
+        font-size: 12px;
+        color: #e2e8f0;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        font-family: 'Fira Code', 'Monaco', monospace;
+      }
+      .mineiro-copy-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        padding: 6px 12px;
+        background: #334155;
+        border: none;
+        border-radius: 6px;
+        color: #e2e8f0;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .mineiro-copy-btn:hover {
+        background: #06b6d4;
+      }
+      .mineiro-attributes-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0;
+        font-size: 12px;
+      }
+      .mineiro-attributes-table th,
+      .mineiro-attributes-table td {
+        padding: 10px;
+        border: 1px solid #334155;
+        text-align: left;
+      }
+      .mineiro-attributes-table th {
+        background: #334155;
+        color: #e2e8f0;
+      }
+      .mineiro-attributes-table code {
+        background: #0f172a;
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #06b6d4;
+      }
     `;
     document.head.appendChild(style);
 
@@ -1410,11 +2635,17 @@
         </button>
       </div>
       <div class="mineiro-admin-actions">
+        <button class="mineiro-admin-btn mineiro-admin-btn-success" id="mineiro-add-btn" title="Añadir contenido">
+          ➕ Añadir
+        </button>
         <button class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-hide-bar-btn" title="Ocultar barra">
           👁️ Ocultar
         </button>
         <button class="mineiro-admin-btn mineiro-admin-btn-secondary" onclick="window.MineiroAdmin.openDashboard()">
           📊 Panel
+        </button>
+        <button class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-settings-btn" title="Configuración">
+          ⚙️
         </button>
         <button class="mineiro-admin-btn mineiro-admin-btn-primary" onclick="window.MineiroAdmin.disable()">
           ✓ Salir
@@ -1435,6 +2666,8 @@
     // Event listeners para la barra
     document.getElementById("mineiro-hide-bar-btn").onclick = () => toggleAdminBar(false);
     document.getElementById("mineiro-undo-btn").onclick = undoLastChange;
+    document.getElementById("mineiro-add-btn").onclick = showAddContentPanel;
+    document.getElementById("mineiro-settings-btn").onclick = showSettingsPanel;
 
     // Add click listener for editing
     document.addEventListener("click", handleAdminClick, true);
@@ -2290,20 +3523,32 @@
     
     if (!input && !richEditor) return;
 
-    // Obtener valor: priorizar HTML enriquecido si existe
-    let value = richHTML || (richEditor ? richEditor.innerHTML : input?.value);
-    let plainTextValue = richEditor ? richEditor.textContent : input?.value;
+    // SI el usuario eligió "original", usar el valor original del código HTML
+    const codeOriginal = htmlOriginalDelCodigo.get(el);
+    let value, plainTextValue, valueForAPI;
     
-    // Determinar si hay formato HTML (estilos individuales como <b>, <i>, etc.)
-    const hasHTMLFormatting = richEditor && value !== plainTextValue && (
-      value.includes('<b>') || value.includes('<strong>') ||
-      value.includes('<i>') || value.includes('<em>') ||
-      value.includes('<u>') || value.includes('<s>') ||
-      value.includes('<span') || value.includes('<font')
-    );
-    
-    // Para guardar en BD: usar HTML si tiene formato, texto plano si no
-    let valueForAPI = hasHTMLFormatting ? value : plainTextValue;
+    if (selectedStyle === "original" && codeOriginal) {
+      // Usar el contenido original del código HTML
+      value = codeOriginal.innerHTML;
+      plainTextValue = codeOriginal.textContent;
+      valueForAPI = plainTextValue;
+      log("Guardando valor ORIGINAL del código HTML");
+    } else {
+      // Obtener valor del editor: priorizar HTML enriquecido si existe
+      value = richHTML || (richEditor ? richEditor.innerHTML : input?.value);
+      plainTextValue = richEditor ? richEditor.textContent : input?.value;
+      
+      // Determinar si hay formato HTML (estilos individuales como <b>, <i>, etc.)
+      const hasHTMLFormatting = richEditor && value !== plainTextValue && (
+        value.includes('<b>') || value.includes('<strong>') ||
+        value.includes('<i>') || value.includes('<em>') ||
+        value.includes('<u>') || value.includes('<s>') ||
+        value.includes('<span') || value.includes('<font')
+      );
+      
+      // Para guardar en BD: usar HTML si tiene formato, texto plano si no
+      valueForAPI = hasHTMLFormatting ? value : plainTextValue;
+    }
     
     if (isPrice) {
       value = parseFloat(plainTextValue) || 0;
@@ -2329,7 +3574,17 @@
       await saveToAPI(parsed, valueForAPI, el);
 
       // Aplicar valor al elemento
-      if (richHTML || richEditor) {
+      if (selectedStyle === "original" && codeOriginal) {
+        // Restaurar completamente al original del código
+        el.innerHTML = codeOriginal.innerHTML;
+        if (codeOriginal.styleAttribute) {
+          el.setAttribute('style', codeOriginal.styleAttribute);
+        } else {
+          el.removeAttribute('style');
+        }
+        // Limpiar estilo personalizado
+        delete el.dataset.mineiroStyle;
+      } else if (richHTML || richEditor) {
         // Si hay contenido HTML enriquecido, aplicarlo directamente
         el.innerHTML = value;
       } else {
