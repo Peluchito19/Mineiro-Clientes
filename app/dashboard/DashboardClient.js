@@ -1,18 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/utils/supabase/client";
-import ProductEditor from "./ProductEditor";
-import SiteConfigEditor from "./SiteConfigEditor";
-import TestimoniosEditor from "./TestimoniosEditor";
 
 export default function DashboardClient({
   userId,
   userEmail,
   initialTiendas = [],
   initialTienda,
-  initialProductos,
 }) {
   const router = useRouter();
   const supabase = getSupabaseClient();
@@ -34,16 +30,12 @@ export default function DashboardClient({
   const [tiendaStatus, setTiendaStatus] = useState("");
   const [creatingTienda, setCreatingTienda] = useState(false);
 
-  // Products
-  const [productos, setProductos] = useState(initialProductos ?? []);
-  const [productosError, setProductosError] = useState("");
-
-  // Modal editor state
-  const [editorProduct, setEditorProduct] = useState(null);
-  const [showEditor, setShowEditor] = useState(false);
-
-  // Tab navigation
-  const [activeTab, setActiveTab] = useState("productos");
+  // Perfil de usuario
+  const [profileEmail, setProfileEmail] = useState(userEmail ?? "");
+  const [emailStatus, setEmailStatus] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordStatus, setPasswordStatus] = useState("");
 
   // Update form when selected tienda changes
   useEffect(() => {
@@ -54,93 +46,76 @@ export default function DashboardClient({
     }
   }, [selectedTienda]);
 
-  // Load products when tienda changes
   useEffect(() => {
-    if (!selectedTienda?.id || !supabase) return;
-
-    const loadProducts = async () => {
-      const { data } = await supabase
-        .from("productos")
-        .select("id, nombre, precio, categoria, visible, user_id, tienda_id, imagen_url, configuracion, dom_id")
-        .eq("tienda_id", selectedTienda.id)
-        .order("nombre", { ascending: true });
-      setProductos(data ?? []);
-    };
-
-    loadProducts();
-  }, [selectedTienda?.id, supabase]);
-
-  // Realtime subscription for products
-  useEffect(() => {
-    if (!selectedTienda?.id || !supabase) return;
-
-    const channel = supabase
-      .channel(`productos-${selectedTienda.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "productos",
-          filter: `tienda_id=eq.${selectedTienda.id}`,
-        },
-        (payload) => {
-          setProductos((current) => {
-            if (payload.eventType === "DELETE") {
-              return current.filter((item) => item.id !== payload.old.id);
-            }
-
-            const nextRow = payload.new;
-            const existingIndex = current.findIndex(
-              (item) => item.id === nextRow.id
-            );
-
-            if (existingIndex === -1) {
-              return [...current, nextRow].sort((a, b) =>
-                (a.nombre || "").localeCompare(b.nombre || "")
-              );
-            }
-
-            const updated = [...current];
-            updated[existingIndex] = nextRow;
-            return updated.sort((a, b) =>
-              (a.nombre || "").localeCompare(b.nombre || "")
-            );
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [selectedTienda?.id, supabase]);
-
-  const totalProductos = useMemo(() => productos.length, [productos]);
-
-  const categorias = useMemo(() => {
-    const cats = [...new Set(productos.map((p) => p.categoria).filter(Boolean))];
-    return cats.sort();
-  }, [productos]);
+    setProfileEmail(userEmail ?? "");
+  }, [userEmail]);
 
   // Handlers
-  const openNewProduct = () => {
-    setEditorProduct(null);
-    setShowEditor(true);
+  const handleChangeEmail = async () => {
+    if (!supabase) return;
+    const nextEmail = profileEmail.trim();
+
+    if (!nextEmail) {
+      setEmailStatus("Ingresa un email válido.");
+      return;
+    }
+
+    setEmailStatus("Enviando confirmación...");
+    const { error } = await supabase.auth.updateUser({ email: nextEmail });
+
+    if (error) {
+      setEmailStatus("Error: " + error.message);
+      return;
+    }
+
+    setEmailStatus("Se envió un email de confirmación.");
   };
 
-  const openEditProduct = (producto) => {
-    setEditorProduct(producto);
-    setShowEditor(true);
+  const handleChangePassword = async () => {
+    if (!supabase) return;
+
+    if (!newPassword || newPassword.length < 6) {
+      setPasswordStatus("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordStatus("Las contraseñas no coinciden.");
+      return;
+    }
+
+    setPasswordStatus("Actualizando...");
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+
+    if (error) {
+      setPasswordStatus("Error: " + error.message);
+      return;
+    }
+
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordStatus("Contraseña actualizada.");
   };
 
-  const closeEditor = () => {
-    setShowEditor(false);
-    setEditorProduct(null);
-  };
+  const handleResetPassword = async () => {
+    if (!supabase) return;
+    const email = profileEmail.trim();
 
-  const handleEditorSave = () => {
-    closeEditor();
+    if (!email) {
+      setPasswordStatus("Ingresa tu email para recuperar la contraseña.");
+      return;
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + "/login?reset=true",
+    });
+
+    if (error) {
+      setPasswordStatus("Error: " + error.message);
+      return;
+    }
+
+    setPasswordStatus("Se envió un email para restablecer la contraseña.");
   };
 
   const handleSaveTienda = async (event) => {
@@ -224,7 +199,6 @@ export default function DashboardClient({
 
   const handleSelectTienda = (tienda) => {
     setSelectedTienda(tienda);
-    setProductos([]);
   };
 
   const handleDeleteTienda = async (tiendaId) => {
@@ -257,33 +231,6 @@ export default function DashboardClient({
       if (remaining.length === 0) {
         setShowOnboarding(true);
       }
-    }
-  };
-
-  const handleToggleVisible = async (producto) => {
-    if (!supabase) return;
-
-    const { error } = await supabase
-      .from("productos")
-      .update({ visible: !producto.visible })
-      .eq("id", producto.id);
-
-    if (error) {
-      setProductosError("No se pudo actualizar la visibilidad.");
-    }
-  };
-
-  const handleDelete = async (productoId) => {
-    if (!supabase) return;
-    if (!confirm("¿Eliminar este producto?")) return;
-
-    const { error } = await supabase
-      .from("productos")
-      .delete()
-      .eq("id", productoId);
-
-    if (error) {
-      setProductosError("No se pudo eliminar el producto.");
     }
   };
 
@@ -552,6 +499,79 @@ export default function DashboardClient({
           </div>
         </header>
 
+        {/* Perfil de Usuario */}
+        <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
+          <div className="flex flex-col gap-2 mb-6">
+            <h2 className="text-xl font-semibold text-white">Perfil y Acceso</h2>
+            <p className="text-sm text-slate-300">
+              Administra tu email y contraseña desde el panel.
+            </p>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-slate-200">
+                Email de la cuenta
+              </label>
+              <input
+                value={profileEmail}
+                onChange={(e) => setProfileEmail(e.target.value)}
+                placeholder="tu@email.com"
+                className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
+              />
+              <button
+                type="button"
+                onClick={handleChangeEmail}
+                className="w-full rounded-xl border border-cyan-500/40 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/10"
+              >
+                📧 Cambiar Email
+              </button>
+              {emailStatus && (
+                <p className="text-xs text-slate-400">{emailStatus}</p>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-slate-200">
+                Nueva contraseña
+              </label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Nueva contraseña"
+                className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
+              />
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirmar contraseña"
+                className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
+              />
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  type="button"
+                  onClick={handleChangePassword}
+                  className="w-full rounded-xl border border-violet-500/40 px-4 py-3 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/10"
+                >
+                  🔑 Cambiar Contraseña
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetPassword}
+                  className="w-full rounded-xl border border-slate-700 px-4 py-3 text-sm text-slate-300 transition hover:bg-slate-800"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+              {passwordStatus && (
+                <p className="text-xs text-slate-400">{passwordStatus}</p>
+              )}
+            </div>
+          </div>
+        </section>
+
         {/* Store Selector */}
         <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-6">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
@@ -668,6 +688,22 @@ export default function DashboardClient({
           </section>
         )}
 
+        {/* Últimos cambios del editor */}
+        {selectedTienda && (
+          <section className="rounded-2xl border border-slate-800/60 bg-slate-900/40 p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-lg">🕒</span>
+              <h3 className="text-lg font-semibold text-white">Últimos cambios</h3>
+            </div>
+            <p className="text-sm text-slate-400">
+              Aquí verás un historial básico de los cambios hechos en el editor visual.
+            </p>
+            <div className="mt-4 rounded-xl border border-slate-800/60 bg-slate-950/60 px-4 py-3 text-sm text-slate-400">
+              Aún no hay cambios registrados.
+            </div>
+          </section>
+        )}
+
         {/* Script de Conexión */}
         {selectedTienda && tiendaSlug && (
           <section className="rounded-2xl border-2 border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-orange-500/5 p-8 shadow-xl">
@@ -728,236 +764,7 @@ export default function DashboardClient({
           </section>
         )}
 
-        {/* Tab Navigation */}
-        {selectedTienda && (
-          <div className="flex flex-wrap gap-2 border-b border-slate-800">
-            <button
-              onClick={() => setActiveTab("productos")}
-              className={`px-5 py-3 text-sm font-medium transition-colors relative ${
-                activeTab === "productos"
-                  ? "text-cyan-400"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              📦 Productos
-              {activeTab === "productos" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-cyan-500 to-blue-500" />
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab("config")}
-              className={`px-5 py-3 text-sm font-medium transition-colors relative ${
-                activeTab === "config"
-                  ? "text-violet-400"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              ⚙️ Configuración del Sitio
-              {activeTab === "config" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-500 to-purple-500" />
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab("testimonios")}
-              className={`px-5 py-3 text-sm font-medium transition-colors relative ${
-                activeTab === "testimonios"
-                  ? "text-amber-400"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              💬 Testimonios
-              {activeTab === "testimonios" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-amber-500 to-orange-500" />
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* Tab Content: Productos */}
-        {selectedTienda && activeTab === "productos" && (
-          <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold text-white">Productos</h2>
-                  <p className="text-sm text-slate-300 mt-1">
-                    Crea, edita o oculta productos para tu catálogo.
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                    {totalProductos} productos
-                  </span>
-                  <button
-                    type="button"
-                    onClick={openNewProduct}
-                    className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-amber-500/20 transition hover:brightness-110"
-                  >
-                    + Nuevo Producto
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {productosError && (
-              <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                {productosError}
-              </div>
-            )}
-
-            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-800/60">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-900/80 text-xs uppercase tracking-[0.18em] text-slate-400">
-                  <tr>
-                    <th className="px-5 py-4">Producto</th>
-                    <th className="px-5 py-4">Precio</th>
-                    <th className="px-5 py-4">Categoría</th>
-                    <th className="px-5 py-4">DOM ID</th>
-                    <th className="px-5 py-4">Estado</th>
-                    <th className="px-5 py-4 text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 bg-slate-950/60">
-                  {productos.length === 0 ? (
-                    <tr>
-                      <td className="px-5 py-6 text-center text-slate-400" colSpan={6}>
-                        No hay productos aún. Crea el primero con el botón de arriba.
-                      </td>
-                    </tr>
-                  ) : (
-                    productos.map((producto) => {
-                      const hasVariants = producto.configuracion?.variantes?.length > 0;
-                      const displayPrice = hasVariants
-                        ? `Desde $${producto.configuracion.variantes[0]?.precio?.toLocaleString("es-CL") || 0}`
-                        : `$${producto.precio?.toLocaleString("es-CL") || 0}`;
-
-                      return (
-                        <tr key={producto.id} className="text-slate-200 hover:bg-slate-900/40 transition-colors">
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="h-12 w-12 overflow-hidden rounded-lg border border-slate-800/70 bg-slate-900/60 flex-shrink-0">
-                                {producto.imagen_url ? (
-                                  <img
-                                    src={producto.imagen_url}
-                                    alt={producto.nombre}
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-500">
-                                    Sin foto
-                                  </div>
-                                )}
-                              </div>
-                              <div>
-                                <span className="font-medium">{producto.nombre}</span>
-                                {hasVariants && (
-                                  <p className="text-xs text-slate-400 mt-0.5">
-                                    {producto.configuracion.variantes.length} variantes
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span className={hasVariants ? "text-amber-400" : ""}>
-                              {displayPrice}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span className="rounded-full bg-slate-700/40 px-3 py-1 text-xs">
-                              {producto.categoria || "Sin categoría"}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4">
-                            {producto.dom_id ? (
-                              <code className="text-xs bg-slate-800 px-2 py-1 rounded text-cyan-300 font-mono">
-                                {producto.dom_id}
-                              </code>
-                            ) : (
-                              <span className="text-xs text-slate-500">—</span>
-                            )}
-                          </td>
-                          <td className="px-5 py-4">
-                            {producto.visible ? (
-                              <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200">
-                                Visible
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-slate-700/40 px-3 py-1 text-xs text-slate-300">
-                                Oculto
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-5 py-4">
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openEditProduct(producto)}
-                                className="rounded-lg bg-cyan-500/20 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
-                              >
-                                Editar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleToggleVisible(producto)}
-                                className="rounded-lg border border-slate-700/60 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800/60"
-                              >
-                                {producto.visible ? "Ocultar" : "Mostrar"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDelete(producto.id)}
-                                className="rounded-lg border border-rose-500/40 px-3 py-2 text-xs text-rose-200 transition hover:bg-rose-500/10"
-                              >
-                                Eliminar
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {/* Tab Content: Site Config */}
-        {selectedTienda && activeTab === "config" && (
-          <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
-            <SiteConfigEditor
-              tienda={selectedTienda}
-              userId={userId}
-              onSave={(newConfig) => {
-                setSelectedTienda((prev) => ({ ...prev, site_config: newConfig }));
-              }}
-            />
-          </section>
-        )}
-
-        {/* Tab Content: Testimonios */}
-        {selectedTienda && activeTab === "testimonios" && (
-          <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
-            <TestimoniosEditor
-              tiendaId={selectedTienda.id}
-              userId={userId}
-            />
-          </section>
-        )}
       </div>
-
-      {/* Product Editor Modal */}
-      {showEditor && selectedTienda && (
-        <ProductEditor
-          product={editorProduct}
-          userId={userId}
-          tiendaId={selectedTienda.id}
-          categorias={categorias}
-          onSave={handleEditorSave}
-          onCancel={closeEditor}
-        />
-      )}
     </div>
   );
 }

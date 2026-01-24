@@ -57,23 +57,12 @@ export default async function DashboardPage() {
   const tienda = tiendas?.[0] ?? null;
 
   // Get productos for the first tienda
-  let productos = [];
-  if (tienda) {
-    const { data: prods } = await supabase
-      .from("productos")
-      .select("id, nombre, precio, categoria, visible, user_id, tienda_id, imagen_url, configuracion, dom_id")
-      .eq("tienda_id", tienda.id)
-      .order("nombre", { ascending: true });
-    productos = prods ?? [];
-  }
-
   return (
     <DashboardClient
       userId={user.id}
       userEmail={user.email}
       initialTiendas={tiendas ?? []}
       initialTienda={tienda}
-      initialProductos={productos}
     />
   );
 }

@@ -1340,36 +1340,6 @@
           <button class="mineiro-btn-primary" id="settings-save-tienda">💾 Guardar Cambios</button>
         </div>
 
-        <!-- Cuenta de usuario -->
-        <div class="mineiro-settings-section">
-          <h4>👤 Cuenta de Usuario</h4>
-          <div class="mineiro-form-group">
-            <label>Email actual</label>
-            <input type="email" id="settings-user-email" placeholder="tu@email.com" />
-          </div>
-          <button class="mineiro-btn-secondary" id="settings-change-email">📧 Cambiar Email</button>
-        </div>
-
-        <div class="mineiro-settings-section">
-          <h4>🔐 Contraseña</h4>
-          <div class="mineiro-form-group">
-            <label>Nueva contraseña</label>
-            <div class="mineiro-password-field">
-              <input type="password" id="settings-new-password" placeholder="Nueva contraseña" />
-              <button type="button" class="mineiro-toggle-password" data-target="settings-new-password">👁️</button>
-            </div>
-          </div>
-          <div class="mineiro-form-group">
-            <label>Confirmar contraseña</label>
-            <div class="mineiro-password-field">
-              <input type="password" id="settings-confirm-password" placeholder="Confirmar contraseña" />
-              <button type="button" class="mineiro-toggle-password" data-target="settings-confirm-password">👁️</button>
-            </div>
-          </div>
-          <button class="mineiro-btn-secondary" id="settings-change-password">🔑 Cambiar Contraseña</button>
-          <button class="mineiro-btn-link" id="settings-forgot-password">¿Olvidaste tu contraseña?</button>
-        </div>
-
         <!-- Manual de uso -->
         <div class="mineiro-settings-section">
           <h4>📖 Ayuda</h4>
@@ -1379,9 +1349,6 @@
       </div>
     `;
     document.body.appendChild(panel);
-
-    // Load user email from Supabase
-    loadUserEmail();
 
     // Toggle password visibility
     panel.querySelectorAll('.mineiro-toggle-password').forEach(btn => {
@@ -1394,9 +1361,6 @@
 
     // Event handlers
     document.getElementById('settings-save-tienda').onclick = saveStoreSettings;
-    document.getElementById('settings-change-email').onclick = changeUserEmail;
-    document.getElementById('settings-change-password').onclick = changeUserPassword;
-    document.getElementById('settings-forgot-password').onclick = resetPassword;
     document.getElementById('settings-open-manual').onclick = showUserManual;
     document.getElementById('settings-open-snippets').onclick = showCodeSnippets;
   };
