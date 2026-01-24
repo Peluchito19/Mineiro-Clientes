@@ -56,13 +56,29 @@ export default async function DashboardPage() {
   // Get first tienda as default
   const tienda = tiendas?.[0] ?? null;
 
-  // Get productos for the first tienda
+  // Get recent changes from elements table for all user's tiendas
+  let initialChanges = [];
+  if (tiendas && tiendas.length > 0) {
+    const slugs = tiendas.map(t => t.slug).filter(Boolean);
+    if (slugs.length > 0) {
+      const { data: changes } = await supabase
+        .from("elements")
+        .select("id, site_id, element_id, type, name, original_value, current_value, updated_at")
+        .in("site_id", slugs)
+        .not("current_value", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(20);
+      initialChanges = changes ?? [];
+    }
+  }
+
   return (
     <DashboardClient
       userId={user.id}
       userEmail={user.email}
       initialTiendas={tiendas ?? []}
       initialTienda={tienda}
+      initialChanges={initialChanges}
     />
   );
 }

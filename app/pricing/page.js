@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import PricingClient from "./PricingClient";
 
+// Demo emails with unlimited free access
+const UNLIMITED_ACCESS_EMAILS = [
+  "natocontreras.xxi@gmail.com",
+];
+
 export default async function PricingPage() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -40,9 +45,18 @@ export default async function PricingPage() {
   // Get user's tienda to check current plan
   const { data: tienda } = await supabase
     .from("tiendas")
-    .select("id, plan, estado_pago")
+    .select("id, plan, estado_pago, trial_ends_at")
     .eq("user_id", user.id)
     .maybeSingle();
 
-  return <PricingClient userId={user.id} tienda={tienda} />;
+  const hasUnlimitedAccess = UNLIMITED_ACCESS_EMAILS.includes(user.email?.toLowerCase());
+
+  return (
+    <PricingClient 
+      userId={user.id} 
+      userEmail={user.email}
+      tienda={tienda} 
+      hasUnlimitedAccess={hasUnlimitedAccess}
+    />
+  );
 }

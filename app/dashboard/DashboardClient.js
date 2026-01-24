@@ -9,6 +9,7 @@ export default function DashboardClient({
   userEmail,
   initialTiendas = [],
   initialTienda,
+  initialChanges = [],
 }) {
   const router = useRouter();
   const supabase = getSupabaseClient();
@@ -16,6 +17,7 @@ export default function DashboardClient({
   // Multi-store support
   const [tiendas, setTiendas] = useState(initialTiendas);
   const [selectedTienda, setSelectedTienda] = useState(initialTienda);
+  const [recentChanges, setRecentChanges] = useState(initialChanges);
   
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(initialTiendas.length === 0);
@@ -557,13 +559,6 @@ export default function DashboardClient({
                 >
                   🔑 Cambiar Contraseña
                 </button>
-                <button
-                  type="button"
-                  onClick={handleResetPassword}
-                  className="w-full rounded-xl border border-slate-700 px-4 py-3 text-sm text-slate-300 transition hover:bg-slate-800"
-                >
-                  ¿Olvidaste tu contraseña?
-                </button>
               </div>
               {passwordStatus && (
                 <p className="text-xs text-slate-400">{passwordStatus}</p>
@@ -627,19 +622,22 @@ export default function DashboardClient({
           )}
         </section>
 
-        {/* Store Settings */}
+        {/* Store Settings + Connection Script Combined */}
         {selectedTienda && (
-          <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
-            <div className="flex flex-col gap-2 mb-6">
-              <h2 className="text-xl font-semibold text-white">
-                Configuración de Tienda
-              </h2>
-              <p className="text-sm text-slate-300">
-                Actualiza los datos de tu negocio.
-              </p>
+          <section className="rounded-2xl border-2 border-cyan-500/30 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
+            <div className="flex items-center gap-2 mb-6">
+              <span className="text-2xl">⚙️</span>
+              <div>
+                <h2 className="text-xl font-semibold text-white">
+                  Configuración y Conexión
+                </h2>
+                <p className="text-sm text-slate-300">
+                  Configura tu tienda y conecta el editor visual a tu sitio web.
+                </p>
+              </div>
             </div>
 
-            <form className="grid gap-5 md:grid-cols-3" onSubmit={handleSaveTienda}>
+            <form className="grid gap-5 md:grid-cols-3 mb-8" onSubmit={handleSaveTienda}>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-200">
                   Nombre del Negocio
@@ -685,86 +683,145 @@ export default function DashboardClient({
                 </button>
               </div>
             </form>
+
+            {/* Connection Script */}
+            {tiendaSlug && (
+              <div className="border-t border-slate-700/50 pt-6">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xl">⚡</span>
+                      <h3 className="text-lg font-semibold text-amber-300">
+                        Conectar con tu sitio web
+                      </h3>
+                    </div>
+                    <p className="text-sm text-slate-300 mb-4">
+                      Pega este script en <strong>{tiendaUrl || "tu sitio"}</strong> antes de cerrar el <code className="bg-slate-800 px-1.5 py-0.5 rounded text-amber-300">&lt;/body&gt;</code>
+                    </p>
+                    <div className="bg-slate-950 rounded-xl p-4 font-mono text-sm overflow-x-auto border border-slate-800">
+                      <code className="text-slate-300">
+                        <span className="text-slate-500">{"<!-- Mineiro Editor -->"}</span>
+                        {"\n"}
+                        <span className="text-violet-400">{"<script "}</span>
+                        <span className="text-cyan-300">src</span>
+                        <span className="text-white">{"="}</span>
+                        <span className="text-amber-300">{`"${typeof window !== 'undefined' ? window.location.origin : 'https://mineiro-clientes.vercel.app'}/mineiro.js"`}</span>
+                        {"\n"}
+                        {"  "}
+                        <span className="text-cyan-300">data-mineiro-site</span>
+                        <span className="text-white">{"="}</span>
+                        <span className="text-amber-300">{`"${tiendaSlug}"`}</span>
+                        <span className="text-violet-400">{">"}</span>
+                        <span className="text-violet-400">{"</script>"}</span>
+                      </code>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {tiendaUrl ? (
+                      <a
+                        href={`${tiendaUrl}?mineiro-admin`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-semibold shadow-lg shadow-cyan-500/20 hover:brightness-110 transition"
+                      >
+                        🎨 Abrir Editor Visual
+                      </a>
+                    ) : (
+                      <div className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-700 text-slate-400">
+                        ⚠️ Configura la URL para habilitar
+                      </div>
+                    )}
+                    <a
+                      href="https://mineiro-clientes.vercel.app/manual"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition"
+                    >
+                      📚 Ver Manual
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
         {/* Últimos cambios del editor */}
         {selectedTienda && (
           <section className="rounded-2xl border border-slate-800/60 bg-slate-900/40 p-6">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-4">
               <span className="text-lg">🕒</span>
               <h3 className="text-lg font-semibold text-white">Últimos cambios</h3>
             </div>
-            <p className="text-sm text-slate-400">
-              Aquí verás un historial básico de los cambios hechos en el editor visual.
-            </p>
-            <div className="mt-4 rounded-xl border border-slate-800/60 bg-slate-950/60 px-4 py-3 text-sm text-slate-400">
-              Aún no hay cambios registrados.
-            </div>
-          </section>
-        )}
-
-        {/* Script de Conexión */}
-        {selectedTienda && tiendaSlug && (
-          <section className="rounded-2xl border-2 border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-orange-500/5 p-8 shadow-xl">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-2xl">⚡</span>
-                  <h2 className="text-xl font-semibold text-white">
-                    Conectar con la Web del Cliente
-                  </h2>
-                </div>
-                <p className="text-sm text-slate-300 mb-4">
-                  Pega este script en la web <strong>{tiendaUrl || "del cliente"}</strong> antes de cerrar el <code className="bg-slate-800 px-1.5 py-0.5 rounded text-amber-300">&lt;/body&gt;</code>
-                </p>
-                <div className="bg-slate-900 rounded-xl p-4 font-mono text-sm overflow-x-auto">
-                  <code className="text-slate-300">
-                    <span className="text-slate-500">{"<!-- Mineiro Editor -->"}</span>
-                    {"\n"}
-                    <span className="text-violet-400">{"<script "}</span>
-                    <span className="text-cyan-300">src</span>
-                    <span className="text-white">{"="}</span>
-                    <span className="text-amber-300">{`"${typeof window !== 'undefined' ? window.location.origin : 'https://mineiro-clientes.vercel.app'}/mineiro.js"`}</span>
-                    {"\n"}
-                    {"  "}
-                    <span className="text-cyan-300">data-mineiro-site</span>
-                    <span className="text-white">{"="}</span>
-                    <span className="text-amber-300">{`"${tiendaSlug}"`}</span>
-                    <span className="text-violet-400">{">"}</span>
-                    <span className="text-violet-400">{"</script>"}</span>
-                  </code>
-                </div>
-              </div>
-              <div className="flex flex-col gap-3">
-                {tiendaUrl ? (
-                  <a
-                    href={`${tiendaUrl}?mineiro-admin`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-semibold shadow-lg shadow-cyan-500/20 hover:brightness-110 transition"
-                  >
-                    🎨 Abrir Editor Visual
-                  </a>
-                ) : (
-                  <div className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-700 text-slate-400">
-                    ⚠️ Configura la URL del sitio para habilitar el editor
+            
+            {(() => {
+              const tiendaChanges = recentChanges.filter(
+                (c) => c.site_id === selectedTienda.slug
+              );
+              
+              if (tiendaChanges.length === 0) {
+                return (
+                  <div className="rounded-xl border border-slate-800/60 bg-slate-950/60 px-4 py-4 text-sm text-slate-400">
+                    Aún no hay cambios registrados. Los cambios aparecerán aquí cuando edites tu sitio.
                   </div>
-                )}
-                <a
-                  href="https://mineiro-clientes.vercel.app/manual"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition"
-                >
-                  📚 Ver Manual de Usuario
-                </a>
-              </div>
-            </div>
+                );
+              }
+              
+              return (
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  {tiendaChanges.map((change) => {
+                    const timeAgo = formatTimeAgo(change.updated_at);
+                    const truncate = (text, maxLen = 50) => {
+                      if (!text) return "—";
+                      return text.length > maxLen ? text.slice(0, maxLen) + "..." : text;
+                    };
+                    
+                    return (
+                      <div
+                        key={change.id}
+                        className="rounded-xl border border-slate-800/60 bg-slate-950/60 px-4 py-3"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-medium text-cyan-400">
+                            {change.type === "text" ? "📝 Texto" : change.type === "image" ? "🖼️ Imagen" : "🔗 Enlace"}
+                          </span>
+                          <span className="text-xs text-slate-500">{timeAgo}</span>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-slate-500 line-through">{truncate(change.original_value)}</span>
+                          <span className="text-slate-600 mx-2">→</span>
+                          <span className="text-emerald-400">{truncate(change.current_value)}</span>
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1">
+                          {change.name || change.element_id}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </section>
         )}
 
       </div>
     </div>
   );
+}
+
+// Helper function to format time ago
+function formatTimeAgo(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+
+  if (diffSec < 60) return "hace unos segundos";
+  if (diffMin < 60) return `hace ${diffMin} min`;
+  if (diffHour < 24) return `hace ${diffHour}h`;
+  if (diffDay < 7) return `hace ${diffDay} día${diffDay > 1 ? "s" : ""}`;
+  return date.toLocaleDateString("es-CL", { day: "numeric", month: "short" });
 }

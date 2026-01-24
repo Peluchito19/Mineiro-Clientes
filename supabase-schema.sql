@@ -56,6 +56,10 @@ DO $$
 BEGIN
   IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tiendas') THEN
     ALTER TABLE tiendas ADD COLUMN IF NOT EXISTS site_config JSONB DEFAULT '{}'::jsonb;
+    -- Add trial_ends_at column for 3-day trial tracking
+    ALTER TABLE tiendas ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
+    -- Add payment_method_added to track if user entered payment info
+    ALTER TABLE tiendas ADD COLUMN IF NOT EXISTS payment_method_added BOOLEAN DEFAULT false;
   END IF;
 END $$;
 

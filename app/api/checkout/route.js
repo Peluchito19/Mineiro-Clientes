@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { cookies, headers } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
 const PRICING = {
   mensual: { title: "Plan Mensual Mineiro", unit_price: 50000 },
   anual: { title: "Plan Anual Mineiro", unit_price: 500000 },
 };
+
+// Demo emails with unlimited free access
+const UNLIMITED_ACCESS_EMAILS = [
+  "natocontreras.xxi@gmail.com",
+];
+
+// Trial period in days
+const TRIAL_DAYS = 3;
 
 export async function POST(request) {
   const cookieStore = await cookies();
@@ -57,7 +66,7 @@ export async function POST(request) {
 
   const successUrl = `${origin}/api/checkout/success?tiendaId=${encodeURIComponent(
     tienda.id
-  )}&status=approved`;
+  )}&plan=${encodeURIComponent(plan)}&status=approved`;
   const pendingUrl = `${origin}/pricing?status=pending`;
   const failureUrl = `${origin}/pricing?status=failure`;
 

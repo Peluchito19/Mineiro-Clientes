@@ -15,6 +15,8 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [checkingSession, setCheckingSession] = useState(true);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
 
   // Check if already logged in
   useEffect(() => {
@@ -137,6 +139,36 @@ export default function LoginPage() {
     setMessage("");
     setPassword("");
     setConfirmPassword("");
+    setShowForgotPassword(false);
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    setLoading(true);
+
+    try {
+      if (!supabase) {
+        setError("Configuración incompleta.");
+        setLoading(false);
+        return;
+      }
+
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: `${window.location.origin}/auth/callback?type=recovery`,
+      });
+
+      if (resetError) {
+        setError(resetError.message);
+      } else {
+        setMessage("¡Te enviamos un correo con instrucciones para restablecer tu contraseña!");
+      }
+    } catch (err) {
+      console.error("Reset password error:", err);
+      setError("Ocurrió un error. Intenta de nuevo.");
+    }
+    setLoading(false);
   };
 
   // Show loading while checking session
@@ -215,9 +247,25 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-200">
-                  Contraseña
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-slate-200">
+                    Contraseña
+                  </label>
+                  {!isRegister && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForgotPassword(true);
+                        setResetEmail(email);
+                        setError("");
+                        setMessage("");
+                      }}
+                      className="text-xs text-cyan-400 hover:underline"
+                    >
+                      ¿Olvidaste tu contraseña?
+                    </button>
+                  )}
+                </div>
                 <input
                   type="password"
                   value={password}
@@ -306,6 +354,59 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-800/60 bg-slate-900 p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-100">
+                Recuperar contraseña
+              </h3>
+              <button
+                onClick={() => {
+                  setShowForgotPassword(false);
+                  setError("");
+                  setMessage("");
+                }}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-slate-400">
+              Ingresa tu correo electrónico y te enviaremos un enlace para restablecer tu contraseña.
+            </p>
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <input
+                type="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="tu@correo.com"
+                required
+                className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
+              />
+              {error && (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                  {error}
+                </div>
+              )}
+              {message && (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                  {message}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 disabled:opacity-70"
+              >
+                {loading ? "Enviando..." : "Enviar enlace"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
