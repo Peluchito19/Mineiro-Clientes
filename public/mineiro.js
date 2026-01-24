@@ -285,6 +285,28 @@
      HYDRATION - Apply values to elements
      ───────────────────────────────────────────────────────────────────────── */
 
+  // Mapa global para guardar el HTML original ANTES de cualquier hidratación
+  const htmlOriginalDelCodigo = new Map();
+
+  // Función para capturar el HTML original de todos los elementos ANTES de hidratar
+  const captureOriginalHTML = () => {
+    const elements = document.querySelectorAll("[data-mineiro-bind]");
+    elements.forEach((el) => {
+      // Solo guardar si no se ha guardado antes
+      if (!htmlOriginalDelCodigo.has(el)) {
+        htmlOriginalDelCodigo.set(el, {
+          innerHTML: el.innerHTML,
+          textContent: el.textContent,
+          src: el.src || null,
+          href: el.href || null,
+          backgroundImage: el.style.backgroundImage || null,
+          styleAttribute: el.getAttribute('style') || '',
+        });
+      }
+    });
+    log(`Capturados ${htmlOriginalDelCodigo.size} elementos originales del código HTML`);
+  };
+
   const applyValueToElement = (el, value, field) => {
     if (value === undefined || value === null) return false;
 
@@ -387,6 +409,9 @@
   };
 
   const runHydration = (tienda, productos, testimonios) => {
+    // IMPORTANTE: Capturar HTML original ANTES de hidratar
+    captureOriginalHTML();
+    
     const elements = document.querySelectorAll("[data-mineiro-bind]:not([data-mineiro-hydrated])");
     let hydrated = 0;
     elements.forEach((el) => {
@@ -675,26 +700,13 @@
   const changeHistory = [];
   const MAX_HISTORY = 50;
   
-  // Almacenar estilos originales de elementos
+  // Almacenar estilos computados de elementos (para referencia)
   const originalStyles = new WeakMap();
-  const originalValues = new WeakMap();
-  const originalInlineStyles = new WeakMap();
 
-  // Guardar estado original COMPLETO antes de editar
-  const saveOriginalState = (el) => {
-    if (!originalValues.has(el)) {
-      const tagName = el.tagName.toLowerCase();
+  // Guardar estilos computados cuando se edita (para referencia, no para restaurar)
+  const saveComputedStyles = (el) => {
+    if (!originalStyles.has(el)) {
       const computedStyle = window.getComputedStyle(el);
-      
-      // Guardar contenido original
-      originalValues.set(el, {
-        textContent: el.textContent,
-        innerHTML: el.innerHTML,
-        src: el.src || null,
-        backgroundImage: el.style.backgroundImage || null,
-      });
-      
-      // Guardar estilos computados (los que vienen del CSS)
       originalStyles.set(el, {
         fontFamily: computedStyle.fontFamily,
         fontSize: computedStyle.fontSize,
@@ -707,28 +719,49 @@
         textDecoration: computedStyle.textDecoration,
         textAlign: computedStyle.textAlign,
       });
-      
-      // Guardar estilos inline originales (el style="" del HTML)
-      originalInlineStyles.set(el, el.getAttribute('style') || '');
     }
   };
 
-  // Restaurar completamente al estado original del código HTML
-  const restoreOriginalState = (el) => {
-    const originalInline = originalInlineStyles.get(el);
+  // Restaurar completamente al estado original del código HTML (ANTES de cualquier hidratación)
+  const restoreToCodeOriginal = (el) => {
+    const original = htmlOriginalDelCodigo.get(el);
     
-    // Restaurar el atributo style original (o eliminarlo si no había)
-    if (originalInline === '' || originalInline === null) {
-      el.removeAttribute('style');
-    } else {
-      el.setAttribute('style', originalInline);
+    if (!original) {
+      warn("No se encontró el HTML original para este elemento");
+      return false;
     }
     
-    log("Estilos originales restaurados");
+    // Restaurar innerHTML original
+    el.innerHTML = original.innerHTML;
+    
+    // Restaurar atributo style original
+    if (original.styleAttribute === '' || original.styleAttribute === null) {
+      el.removeAttribute('style');
+    } else {
+      el.setAttribute('style', original.styleAttribute);
+    }
+    
+    // Restaurar src si es imagen
+    if (original.src && el.tagName.toLowerCase() === 'img') {
+      el.src = original.src;
+    }
+    
+    // Restaurar href si es enlace
+    if (original.href && el.tagName.toLowerCase() === 'a') {
+      el.href = original.href;
+    }
+    
+    // Quitar marca de hidratado para que pueda volver a hidratarse si es necesario
+    delete el.dataset.mineiroHydrated;
+    
+    log("✓ Restaurado al HTML original del código");
+    return true;
   };
 
   // Agregar cambio al historial
   const addToHistory = (el, binding, oldValue, newValue, field) => {
+    const original = htmlOriginalDelCodigo.get(el);
+    
     changeHistory.push({
       element: el,
       binding,
@@ -736,8 +769,7 @@
       newValue,
       field,
       timestamp: Date.now(),
-      styles: originalStyles.get(el),
-      inlineStyles: originalInlineStyles.get(el),
+      codeOriginal: original, // Guardar referencia al original del código
     });
     
     if (changeHistory.length > MAX_HISTORY) {
@@ -755,7 +787,7 @@
     }
 
     const lastChange = changeHistory.pop();
-    const { element, binding, oldValue, field, styles, inlineStyles } = lastChange;
+    const { element, binding, oldValue, field, codeOriginal } = lastChange;
 
     log(`Deshaciendo: ${binding} -> "${oldValue}"`);
 
@@ -768,12 +800,12 @@
       applyValueToElement(element, oldValue, field);
     }
     
-    // Restaurar estilos inline originales
-    if (inlineStyles !== undefined) {
-      if (inlineStyles === '' || inlineStyles === null) {
+    // Restaurar estilos inline del código original (si hay referencia)
+    if (codeOriginal && codeOriginal.styleAttribute !== undefined) {
+      if (codeOriginal.styleAttribute === '' || codeOriginal.styleAttribute === null) {
         element.removeAttribute('style');
       } else {
-        element.setAttribute('style', inlineStyles);
+        element.setAttribute('style', codeOriginal.styleAttribute);
       }
     }
 
@@ -1491,8 +1523,8 @@
     selectedElement = el;
     el.classList.add("mineiro-selected");
 
-    // Guardar estado original
-    saveOriginalState(el);
+    // Guardar estilos computados para referencia
+    saveComputedStyles(el);
 
     showEditPopup(el);
   };
@@ -1957,8 +1989,8 @@
   const previewStyleOnElement = (el, style, originalStyle) => {
     switch (style) {
       case "original":
-        // Restaurar completamente al estado original del HTML
-        restoreOriginalState(el);
+        // Restaurar completamente al estado original del código HTML (ANTES de hidratación)
+        restoreToCodeOriginal(el);
         break;
       case "normal":
         el.style.fontWeight = '400';
