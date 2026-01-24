@@ -152,7 +152,62 @@ CREATE TRIGGER elements_updated_at BEFORE UPDATE ON elements
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ─────────────────────────────────────────────────────────────────────────
--- REALTIME (ignorar si ya están agregadas)
+-- RLS PARA TIENDAS - Permitir lectura pública
+-- ─────────────────────────────────────────────────────────────────────────
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tiendas') THEN
+    ALTER TABLE tiendas ENABLE ROW LEVEL SECURITY;
+    
+    DROP POLICY IF EXISTS "Tiendas son legibles públicamente" ON tiendas;
+    CREATE POLICY "Tiendas son legibles públicamente" ON tiendas FOR SELECT USING (true);
+    
+    DROP POLICY IF EXISTS "Tiendas editables por service role" ON tiendas;
+    CREATE POLICY "Tiendas editables por service role" ON tiendas FOR UPDATE USING (true);
+    
+    DROP POLICY IF EXISTS "Tiendas insertables" ON tiendas;
+    CREATE POLICY "Tiendas insertables" ON tiendas FOR INSERT WITH CHECK (true);
+  END IF;
+END $$;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- RLS PARA PRODUCTOS - Permitir lectura pública
+-- ─────────────────────────────────────────────────────────────────────────
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'productos') THEN
+    ALTER TABLE productos ENABLE ROW LEVEL SECURITY;
+    
+    DROP POLICY IF EXISTS "Productos visibles son públicos" ON productos;
+    CREATE POLICY "Productos visibles son públicos" ON productos FOR SELECT USING (true);
+    
+    DROP POLICY IF EXISTS "Productos editables" ON productos;
+    CREATE POLICY "Productos editables" ON productos FOR UPDATE USING (true);
+    
+    DROP POLICY IF EXISTS "Productos insertables" ON productos;
+    CREATE POLICY "Productos insertables" ON productos FOR INSERT WITH CHECK (true);
+  END IF;
+END $$;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- RLS TESTIMONIOS - Actualizar para lectura pública
+-- ─────────────────────────────────────────────────────────────────────────
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'testimonios') THEN
+    DROP POLICY IF EXISTS "Testimonios visibles son públicos" ON testimonios;
+    CREATE POLICY "Testimonios visibles son públicos" ON testimonios FOR SELECT USING (true);
+    
+    DROP POLICY IF EXISTS "Testimonios editables" ON testimonios;
+    CREATE POLICY "Testimonios editables" ON testimonios FOR UPDATE USING (true);
+    
+    DROP POLICY IF EXISTS "Testimonios insertables" ON testimonios;
+    CREATE POLICY "Testimonios insertables" ON testimonios FOR INSERT WITH CHECK (true);
+  END IF;
+END $$;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- REALTIME - Habilitar para todas las tablas necesarias
 -- ─────────────────────────────────────────────────────────────────────────
 DO $$ 
 BEGIN
@@ -168,8 +223,36 @@ EXCEPTION WHEN duplicate_object THEN
   NULL;
 END $$;
 
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tiendas') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE tiendas;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
+
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'productos') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE productos;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
+
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'testimonios') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE testimonios;
+  END IF;
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- ✅ LISTO! Ahora:
+-- ✅ LISTO! Ejecuta este script en el SQL Editor de Supabase
+-- Luego:
 -- 1. Pega el script en la web del cliente
 -- 2. Abre el editor en /editor/{slug}
 -- ═══════════════════════════════════════════════════════════════════════════

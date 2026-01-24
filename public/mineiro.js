@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   MINEIRO UNIFIED ENGINE v5 - Editor Visual Universal
+   MINEIRO UNIFIED ENGINE v6 - Editor Visual Universal
    "Una línea de código. Control total."
    
    Este script:
@@ -7,14 +7,25 @@
    2. Hidrata los elementos con data-mineiro-bind
    3. Permite edición visual inline (modo admin)
    4. Guarda cambios directamente en las tablas originales
+   5. Sincroniza cambios en tiempo real via polling (fallback si WebSocket falla)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 (function() {
   "use strict";
 
-  const VERSION = "5.0.0";
+  const VERSION = "6.0.0";
   const SUPABASE_URL = "https://zzgyczbiufafthizurbv.supabase.co";
   const SUPABASE_CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
+  
+  // API URLs
+  const API_BASE_URL = "https://mineiro-clientes.vercel.app/api";
+  const TIENDA_API_URL = `${API_BASE_URL}/tienda`;
+  const EDIT_API_URL = `${API_BASE_URL}/edit`;
+  
+  // Polling interval para sincronización (5 segundos)
+  const POLL_INTERVAL = 5000;
+  let pollTimer = null;
+  let lastDataHash = null;
   
   // Clave anon pública de Supabase
   const getSupabaseKey = () => {
@@ -106,7 +117,7 @@
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     DATA FETCHING
+     DATA FETCHING - Siempre via API (bypass RLS)
      ───────────────────────────────────────────────────────────────────────── */
 
   const getSiteId = () => {
@@ -128,7 +139,17 @@
     return hostname.replace(/\./g, "-");
   };
 
-  const TIENDA_API_URL = "https://mineiro-clientes.vercel.app/api/tienda";
+  // Función para generar hash simple de datos para detectar cambios
+  const generateDataHash = (data) => {
+    try {
+      return JSON.stringify(data).split('').reduce((a, b) => {
+        a = ((a << 5) - a) + b.charCodeAt(0);
+        return a & a;
+      }, 0).toString();
+    } catch {
+      return Date.now().toString();
+    }
+  };
 
   // Función unificada que carga tienda + productos + testimonios via API (bypass RLS)
   const fetchAllData = async (slug) => {
@@ -137,11 +158,18 @@
     try {
       // Usar la API con include=all para cargar todo
       const response = await fetch(
-        `${TIENDA_API_URL}?slug=${encodeURIComponent(slug)}&hostname=${encodeURIComponent(hostname)}&include=all`
+        `${TIENDA_API_URL}?slug=${encodeURIComponent(slug)}&hostname=${encodeURIComponent(hostname)}&include=all`,
+        { cache: 'no-store' } // Evitar cache para obtener datos frescos
       );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
       const result = await response.json();
       
       if (result.found && result.tienda) {
+        log(`API respondió: tienda=${result.tienda.nombre_negocio}, productos=${(result.productos || []).length}, testimonios=${(result.testimonios || []).length}`);
         return {
           tienda: result.tienda,
           productos: result.productos || [],
@@ -293,20 +321,28 @@
       }
 
       case "testimonio": {
+        // Primero buscar en testimonios de BD
         const testimonio = testimonios.find(t => t.dom_id === parsed.domId);
         if (testimonio) {
           value = getNestedValue(testimonio, parsed.field) ?? testimonio[parsed.field];
+        } else {
+          // Fallback: buscar en site_config.testimonios
+          value = getNestedValue(siteConfig, `testimonios.${parsed.domId}.${parsed.field}`);
         }
         break;
       }
 
       case "producto": {
+        // Primero buscar en productos de BD
         const producto = productos.find(p => p.dom_id === parsed.identifier)
                       || productos.find(p => String(p.id) === parsed.identifier);
         if (producto) {
           value = parsed.field.includes(".")
             ? getNestedValue(producto, parsed.field)
             : producto[parsed.field];
+        } else {
+          // Fallback: buscar en site_config.productos (para cuando no hay BD)
+          value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
         }
         break;
       }
@@ -380,83 +416,184 @@
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     REALTIME SUBSCRIPTIONS
+     REALTIME SUBSCRIPTIONS + POLLING FALLBACK
      ───────────────────────────────────────────────────────────────────────── */
 
+  let realtimeConnected = false;
+
   const subscribeToChanges = (tiendaId) => {
-    // Subscribe to productos changes
-    supabase
-      .channel(`productos-${tiendaId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "productos",
-          filter: `tienda_id=eq.${tiendaId}`,
-        },
-        (payload) => {
-          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
-            const producto = payload.new;
-            // Update cache
-            const idx = productosCache.findIndex(p => p.id === producto.id);
-            if (idx >= 0) {
-              productosCache[idx] = producto;
-            } else {
-              productosCache.push(producto);
+    if (!supabase) {
+      warn("Supabase no inicializado, usando solo polling");
+      startPolling();
+      return;
+    }
+
+    try {
+      // Subscribe to productos changes
+      const productosChannel = supabase
+        .channel(`productos-${tiendaId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "productos",
+            filter: `tienda_id=eq.${tiendaId}`,
+          },
+          (payload) => {
+            log("Realtime: cambio en productos detectado");
+            if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+              const producto = payload.new;
+              // Update cache
+              const idx = productosCache.findIndex(p => p.id === producto.id);
+              if (idx >= 0) {
+                productosCache[idx] = producto;
+              } else {
+                productosCache.push(producto);
+              }
+              // Re-hydrate elements for this product
+              rehydrateProducto(producto);
+              // Force full re-hydrate
+              forceRehydrateAll();
             }
-            // Re-hydrate elements for this product
-            rehydrateProducto(producto);
           }
-        }
-      )
-      .subscribe();
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            realtimeConnected = true;
+            log("✓ Realtime conectado para productos");
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            warn("Realtime productos falló, usando polling");
+            startPolling();
+          }
+        });
 
-    // Subscribe to tienda changes
-    supabase
-      .channel(`tienda-${tiendaId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "tiendas",
-          filter: `id=eq.${tiendaId}`,
-        },
-        (payload) => {
-          tiendaData = payload.new;
-          runHydration(tiendaData, productosCache, testimoniosCache);
-        }
-      )
-      .subscribe();
+      // Subscribe to tienda changes
+      const tiendaChannel = supabase
+        .channel(`tienda-${tiendaId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "tiendas",
+            filter: `id=eq.${tiendaId}`,
+          },
+          (payload) => {
+            log("Realtime: cambio en tienda detectado");
+            tiendaData = payload.new;
+            forceRehydrateAll();
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            log("✓ Realtime conectado para tienda");
+          }
+        });
 
-    // Subscribe to testimonios changes
-    supabase
-      .channel(`testimonios-${tiendaId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "testimonios",
-          filter: `tienda_id=eq.${tiendaId}`,
-        },
-        (payload) => {
-          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
-            const testimonio = payload.new;
-            const idx = testimoniosCache.findIndex(t => t.id === testimonio.id);
-            if (idx >= 0) {
-              testimoniosCache[idx] = testimonio;
-            } else {
-              testimoniosCache.push(testimonio);
+      // Subscribe to testimonios changes
+      const testimoniosChannel = supabase
+        .channel(`testimonios-${tiendaId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "testimonios",
+            filter: `tienda_id=eq.${tiendaId}`,
+          },
+          (payload) => {
+            log("Realtime: cambio en testimonios detectado");
+            if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+              const testimonio = payload.new;
+              const idx = testimoniosCache.findIndex(t => t.id === testimonio.id);
+              if (idx >= 0) {
+                testimoniosCache[idx] = testimonio;
+              } else {
+                testimoniosCache.push(testimonio);
+              }
+              rehydrateTestimonio(testimonio);
+              forceRehydrateAll();
             }
-            rehydrateTestimonio(testimonio);
           }
-        }
-      )
-      .subscribe();
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            log("✓ Realtime conectado para testimonios");
+          }
+        });
 
-    log("Suscrito a cambios en tiempo real");
+      log("Suscrito a cambios en tiempo real");
+      
+      // Iniciar polling como respaldo después de un timeout
+      setTimeout(() => {
+        if (!realtimeConnected) {
+          warn("Realtime no conectó, iniciando polling");
+          startPolling();
+        }
+      }, 5000);
+      
+    } catch (error) {
+      warn("Error en realtime:", error.message);
+      startPolling();
+    }
+  };
+
+  // Polling como fallback para sincronización
+  const startPolling = () => {
+    if (pollTimer) return; // Ya está corriendo
+    
+    log("Iniciando polling para sincronización (cada 5s)");
+    
+    pollTimer = setInterval(async () => {
+      if (!tiendaData) return;
+      
+      try {
+        const siteId = getSiteId();
+        const newData = await fetchAllData(siteId);
+        
+        if (!newData.tienda) return;
+        
+        const newHash = generateDataHash({
+          tienda: newData.tienda.site_config,
+          productos: newData.productos,
+          testimonios: newData.testimonios
+        });
+        
+        if (lastDataHash && newHash !== lastDataHash) {
+          log("Polling: detectados cambios, actualizando...");
+          
+          // Actualizar caches
+          tiendaData = newData.tienda;
+          productosCache = newData.productos;
+          testimoniosCache = newData.testimonios;
+          
+          // Forzar re-hidratación
+          forceRehydrateAll();
+        }
+        
+        lastDataHash = newHash;
+        
+      } catch (error) {
+        // Silenciar errores de polling
+      }
+    }, POLL_INTERVAL);
+  };
+
+  const stopPolling = () => {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      log("Polling detenido");
+    }
+  };
+
+  // Forzar re-hidratación completa (quitar atributo hydrated)
+  const forceRehydrateAll = () => {
+    document.querySelectorAll("[data-mineiro-bind][data-mineiro-hydrated]").forEach(el => {
+      el.removeAttribute("data-mineiro-hydrated");
+    });
+    runHydration(tiendaData, productosCache, testimoniosCache);
   };
 
   const rehydrateProducto = (producto) => {
@@ -944,9 +1081,6 @@
     input.select();
   };
 
-  // URL de la API para guardar cambios
-  const API_URL = "https://mineiro-clientes.vercel.app/api/edit";
-
   const saveElementChange = async (el, parsed, isImage, isPrice) => {
     const input = document.getElementById("mineiro-edit-input");
     const saveBtn = document.getElementById("mineiro-save-btn");
@@ -1044,9 +1178,37 @@
             }
           }
           
+          // Si no hay productos en cache, guardar en site_config como fallback
+          if (!producto && productosCache.length === 0) {
+            log(`Sin productos en BD, guardando en site_config.productos.${parsed.identifier}`);
+            
+            // Verificar que tiendaData existe
+            if (!tiendaData || !tiendaData.id) {
+              throw new Error("Tienda no configurada. Verifica el slug en data-mineiro-site");
+            }
+            
+            // Guardar en site_config.productos como objeto dinámico
+            const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+            if (!siteConfig.productos) siteConfig.productos = {};
+            if (!siteConfig.productos[parsed.identifier]) siteConfig.productos[parsed.identifier] = {};
+            
+            siteConfig.productos[parsed.identifier][parsed.field] = value;
+            
+            apiPayload = {
+              action: "update",
+              table: "tiendas",
+              data: { site_config: siteConfig },
+              where: { id: tiendaData.id }
+            };
+            
+            // Update local cache
+            tiendaData.site_config = siteConfig;
+            break;
+          }
+          
           if (!producto) {
             warn("Productos disponibles:", productosCache.map(p => ({ id: p.id, nombre: p.nombre, dom_id: p.dom_id })));
-            throw new Error(`Producto no encontrado: ${parsed.identifier}. Verifica que exista en la base de datos.`);
+            throw new Error(`Producto no encontrado: ${parsed.identifier}. Verifica que exista en la base de datos o que el dom_id coincida.`);
           }
 
           log(`Producto encontrado: ${producto.nombre} (id: ${producto.id})`);
@@ -1120,6 +1282,31 @@
             }
           }
           
+          // Si no hay testimonios en cache, guardar en site_config como fallback
+          if (!testimonio && testimoniosCache.length === 0) {
+            log(`Sin testimonios en BD, guardando en site_config.testimonios.${parsed.domId}`);
+            
+            if (!tiendaData || !tiendaData.id) {
+              throw new Error("Tienda no configurada. Verifica el slug en data-mineiro-site");
+            }
+            
+            const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+            if (!siteConfig.testimonios) siteConfig.testimonios = {};
+            if (!siteConfig.testimonios[parsed.domId]) siteConfig.testimonios[parsed.domId] = {};
+            
+            siteConfig.testimonios[parsed.domId][parsed.field] = value;
+            
+            apiPayload = {
+              action: "update",
+              table: "tiendas",
+              data: { site_config: siteConfig },
+              where: { id: tiendaData.id }
+            };
+            
+            tiendaData.site_config = siteConfig;
+            break;
+          }
+          
           if (!testimonio) {
             warn("Testimonios disponibles:", testimoniosCache.map(t => ({ id: t.id, nombre: t.nombre, dom_id: t.dom_id })));
             throw new Error(`Testimonio no encontrado: ${parsed.domId}. Verifica que exista en la base de datos.`);
@@ -1144,7 +1331,7 @@
       if (apiPayload) {
         log("Enviando a API:", JSON.stringify(apiPayload, null, 2));
         
-        const response = await fetch(API_URL, {
+        const response = await fetch(EDIT_API_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(apiPayload)
@@ -1256,11 +1443,40 @@
       const siteId = getSiteId();
       window.open(`https://mineiro-clientes.vercel.app/dashboard`, "_blank");
     },
-    refresh: () => {
-      if (tiendaData) {
-        runHydration(tiendaData, productosCache, testimoniosCache);
+    refresh: async () => {
+      log("Refrescando datos manualmente...");
+      const siteId = getSiteId();
+      const newData = await fetchAllData(siteId);
+      if (newData.tienda) {
+        tiendaData = newData.tienda;
+        productosCache = newData.productos;
+        testimoniosCache = newData.testimonios;
+        forceRehydrateAll();
+        log("✓ Datos actualizados");
       }
     },
+    forceSync: async () => {
+      log("Forzando sincronización...");
+      const siteId = getSiteId();
+      const newData = await fetchAllData(siteId);
+      if (newData.tienda) {
+        tiendaData = newData.tienda;
+        productosCache = newData.productos;
+        testimoniosCache = newData.testimonios;
+        lastDataHash = generateDataHash({
+          tienda: tiendaData.site_config,
+          productos: productosCache,
+          testimonios: testimoniosCache
+        });
+        forceRehydrateAll();
+        log("✓ Sincronización completa");
+      }
+    },
+    getData: () => ({
+      tienda: tiendaData,
+      productos: productosCache,
+      testimonios: testimoniosCache
+    }),
     getSiteId,
     version: VERSION,
   };
@@ -1317,12 +1533,29 @@
         setTimeout(() => runHydration(tiendaData, productosCache, testimoniosCache), 1500);
         setTimeout(() => runHydration(tiendaData, productosCache, testimoniosCache), 3000);
 
-        // Subscribe to realtime changes (puede fallar por RLS pero no es crítico)
+        // Guardar hash inicial para polling
+        lastDataHash = generateDataHash({
+          tienda: tiendaData.site_config,
+          productos: productosCache,
+          testimonios: testimoniosCache
+        });
+
+        // Subscribe to realtime changes + iniciar polling como respaldo
         try {
           subscribeToChanges(tiendaData.id);
         } catch (e) {
-          warn("Realtime no disponible, los cambios se verán al recargar");
+          warn("Realtime no disponible, usando polling");
+          startPolling();
         }
+        
+        // Siempre iniciar polling para garantizar sincronización
+        // (se detendrá si el realtime funciona correctamente)
+        setTimeout(() => {
+          if (!realtimeConnected) {
+            startPolling();
+          }
+        }, 6000);
+        
       } else {
         warn(`Tienda no encontrada para: ${siteId}`);
         log("El modo admin funcionará pero sin datos de la tienda");
