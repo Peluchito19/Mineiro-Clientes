@@ -678,13 +678,15 @@
   // Almacenar estilos originales de elementos
   const originalStyles = new WeakMap();
   const originalValues = new WeakMap();
+  const originalInlineStyles = new WeakMap();
 
-  // Guardar estado original antes de editar
+  // Guardar estado original COMPLETO antes de editar
   const saveOriginalState = (el) => {
     if (!originalValues.has(el)) {
       const tagName = el.tagName.toLowerCase();
       const computedStyle = window.getComputedStyle(el);
       
+      // Guardar contenido original
       originalValues.set(el, {
         textContent: el.textContent,
         innerHTML: el.innerHTML,
@@ -692,6 +694,7 @@
         backgroundImage: el.style.backgroundImage || null,
       });
       
+      // Guardar estilos computados (los que vienen del CSS)
       originalStyles.set(el, {
         fontFamily: computedStyle.fontFamily,
         fontSize: computedStyle.fontSize,
@@ -701,8 +704,27 @@
         textTransform: computedStyle.textTransform,
         letterSpacing: computedStyle.letterSpacing,
         lineHeight: computedStyle.lineHeight,
+        textDecoration: computedStyle.textDecoration,
+        textAlign: computedStyle.textAlign,
       });
+      
+      // Guardar estilos inline originales (el style="" del HTML)
+      originalInlineStyles.set(el, el.getAttribute('style') || '');
     }
+  };
+
+  // Restaurar completamente al estado original del código HTML
+  const restoreOriginalState = (el) => {
+    const originalInline = originalInlineStyles.get(el);
+    
+    // Restaurar el atributo style original (o eliminarlo si no había)
+    if (originalInline === '' || originalInline === null) {
+      el.removeAttribute('style');
+    } else {
+      el.setAttribute('style', originalInline);
+    }
+    
+    log("Estilos originales restaurados");
   };
 
   // Agregar cambio al historial
@@ -715,6 +737,7 @@
       field,
       timestamp: Date.now(),
       styles: originalStyles.get(el),
+      inlineStyles: originalInlineStyles.get(el),
     });
     
     if (changeHistory.length > MAX_HISTORY) {
@@ -732,20 +755,26 @@
     }
 
     const lastChange = changeHistory.pop();
-    const { element, binding, oldValue, field, styles } = lastChange;
+    const { element, binding, oldValue, field, styles, inlineStyles } = lastChange;
 
     log(`Deshaciendo: ${binding} -> "${oldValue}"`);
 
-    // Restaurar valor visual
-    applyValueToElement(element, oldValue, field);
+    // Restaurar contenido (puede ser HTML o texto)
+    if (oldValue && (oldValue.includes('<') || oldValue.includes('>'))) {
+      // Es HTML, restaurar innerHTML
+      element.innerHTML = oldValue;
+    } else {
+      // Es texto plano
+      applyValueToElement(element, oldValue, field);
+    }
     
-    // Restaurar estilos originales si existen
-    if (styles) {
-      Object.keys(styles).forEach(prop => {
-        if (styles[prop]) {
-          element.style[prop] = '';
-        }
-      });
+    // Restaurar estilos inline originales
+    if (inlineStyles !== undefined) {
+      if (inlineStyles === '' || inlineStyles === null) {
+        element.removeAttribute('style');
+      } else {
+        element.setAttribute('style', inlineStyles);
+      }
     }
 
     // Enviar cambio a la API
@@ -1193,6 +1222,116 @@
         margin-left: 6px;
       }
       
+      /* Editor de texto enriquecido */
+      .mineiro-rich-editor {
+        width: 100%;
+        min-height: 80px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 2px solid #475569;
+        background: #0f172a;
+        color: #f1f5f9;
+        font-size: 14px;
+        margin-top: 8px;
+        transition: border-color 0.2s;
+        overflow-y: auto;
+        max-height: 200px;
+        line-height: 1.5;
+        outline: none;
+      }
+      .mineiro-rich-editor:focus {
+        border-color: #06b6d4;
+      }
+      .mineiro-rich-editor.mineiro-single-line {
+        min-height: 44px;
+        max-height: 44px;
+        overflow: hidden;
+        white-space: nowrap;
+      }
+      .mineiro-rich-editor b, .mineiro-rich-editor strong {
+        font-weight: 700;
+      }
+      .mineiro-rich-editor i, .mineiro-rich-editor em {
+        font-style: italic;
+      }
+      .mineiro-rich-editor u {
+        text-decoration: underline;
+      }
+      .mineiro-rich-editor s, .mineiro-rich-editor strike {
+        text-decoration: line-through;
+      }
+      
+      /* Barra de formato */
+      .mineiro-format-toolbar {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+        padding: 8px;
+        background: #0f172a;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        align-items: center;
+      }
+      .mineiro-format-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border: 1px solid #475569;
+        background: #1e293b;
+        color: #e2e8f0;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .mineiro-format-btn:hover {
+        border-color: #06b6d4;
+        background: #334155;
+      }
+      .mineiro-format-btn.active {
+        border-color: #06b6d4;
+        background: #06b6d4;
+        color: #0f172a;
+      }
+      .mineiro-format-separator {
+        width: 1px;
+        height: 24px;
+        background: #475569;
+        margin: 0 4px;
+      }
+      .mineiro-format-select {
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid #475569;
+        background: #1e293b;
+        color: #e2e8f0;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .mineiro-format-select:focus {
+        border-color: #06b6d4;
+        outline: none;
+      }
+      .mineiro-color-picker {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border: 1px solid #475569;
+        background: #1e293b;
+        cursor: pointer;
+        padding: 2px;
+      }
+      .mineiro-color-picker::-webkit-color-swatch-wrapper {
+        padding: 2px;
+      }
+      .mineiro-color-picker::-webkit-color-swatch {
+        border-radius: 4px;
+        border: none;
+      }
+      
       /* Loading spinner */
       .mineiro-spinner {
         width: 16px;
@@ -1492,15 +1631,34 @@
       `;
     } else if (isLongText) {
       contentHTML = `
-        <label>Texto</label>
-        <textarea id="mineiro-edit-input">${currentValue || ""}</textarea>
+        <label>Texto (editor enriquecido)</label>
+        <div class="mineiro-rich-editor" id="mineiro-rich-editor" contenteditable="true">${el.innerHTML || currentValue || ""}</div>
+        <input type="hidden" id="mineiro-edit-input" value="${escapedValue}" />
         
-        <label>Estilo de texto</label>
+        <label>Barra de formato</label>
+        <div class="mineiro-format-toolbar">
+          <button type="button" class="mineiro-format-btn" data-command="bold" title="Negrita (Ctrl+B)"><b>B</b></button>
+          <button type="button" class="mineiro-format-btn" data-command="italic" title="Cursiva (Ctrl+I)"><i>I</i></button>
+          <button type="button" class="mineiro-format-btn" data-command="underline" title="Subrayado (Ctrl+U)"><u>U</u></button>
+          <button type="button" class="mineiro-format-btn" data-command="strikeThrough" title="Tachado"><s>S</s></button>
+          <span class="mineiro-format-separator"></span>
+          <button type="button" class="mineiro-format-btn" data-command="justifyLeft" title="Alinear izquierda">⬅</button>
+          <button type="button" class="mineiro-format-btn" data-command="justifyCenter" title="Centrar">⬌</button>
+          <button type="button" class="mineiro-format-btn" data-command="justifyRight" title="Alinear derecha">➡</button>
+          <span class="mineiro-format-separator"></span>
+          <select class="mineiro-format-select" id="mineiro-font-size" title="Tamaño de fuente">
+            <option value="">Tamaño</option>
+            <option value="1">Pequeño</option>
+            <option value="3">Normal</option>
+            <option value="5">Grande</option>
+            <option value="7">Muy grande</option>
+          </select>
+        </div>
+        
+        <label>Estilo general</label>
         <div class="mineiro-style-options">
-          <button type="button" class="mineiro-style-btn active" data-style="original">Original</button>
+          <button type="button" class="mineiro-style-btn active" data-style="original">🔄 Original</button>
           <button type="button" class="mineiro-style-btn" data-style="normal">Normal</button>
-          <button type="button" class="mineiro-style-btn" data-style="bold">Negrita</button>
-          <button type="button" class="mineiro-style-btn" data-style="light">Ligero</button>
         </div>
       `;
     } else if (isPrice) {
@@ -1518,14 +1676,25 @@
     } else {
       contentHTML = `
         <label>Contenido</label>
-        <input type="text" id="mineiro-edit-input" value="${escapedValue}" />
+        <div class="mineiro-rich-editor mineiro-single-line" id="mineiro-rich-editor" contenteditable="true">${el.innerHTML || currentValue || ""}</div>
+        <input type="hidden" id="mineiro-edit-input" value="${escapedValue}" />
         
-        <label>Estilo de texto</label>
+        <label>Formato de texto</label>
+        <div class="mineiro-format-toolbar">
+          <button type="button" class="mineiro-format-btn" data-command="bold" title="Negrita"><b>B</b></button>
+          <button type="button" class="mineiro-format-btn" data-command="italic" title="Cursiva"><i>I</i></button>
+          <button type="button" class="mineiro-format-btn" data-command="underline" title="Subrayado"><u>U</u></button>
+          <button type="button" class="mineiro-format-btn" data-command="strikeThrough" title="Tachado"><s>S</s></button>
+          <span class="mineiro-format-separator"></span>
+          <input type="color" class="mineiro-color-picker" id="mineiro-text-color" value="#ffffff" title="Color de texto">
+        </div>
+        
+        <label>Estilo general del elemento</label>
         <div class="mineiro-style-options">
-          <button type="button" class="mineiro-style-btn active" data-style="original">Original</button>
-          <button type="button" class="mineiro-style-btn" data-style="normal">Normal</button>
+          <button type="button" class="mineiro-style-btn active" data-style="original">🔄 Original</button>
           <button type="button" class="mineiro-style-btn" data-style="bold">Negrita</button>
-          <button type="button" class="mineiro-style-btn" data-style="uppercase">MAYÚSCULAS</button>
+          <button type="button" class="mineiro-style-btn" data-style="italic">Cursiva</button>
+          <button type="button" class="mineiro-style-btn" data-style="uppercase">ABC</button>
         </div>
       `;
     }
@@ -1641,6 +1810,84 @@
       });
     });
 
+    // Editor de texto enriquecido
+    const richEditor = document.getElementById("mineiro-rich-editor");
+    const formatButtons = popup.querySelectorAll(".mineiro-format-btn");
+    const fontSizeSelect = document.getElementById("mineiro-font-size");
+    const textColorPicker = document.getElementById("mineiro-text-color");
+    
+    if (richEditor) {
+      // Sincronizar contenido con input oculto
+      richEditor.addEventListener("input", () => {
+        if (input) {
+          input.value = richEditor.textContent;
+        }
+      });
+      
+      // Prevenir propagación
+      richEditor.addEventListener("click", (e) => e.stopPropagation());
+      richEditor.addEventListener("mousedown", (e) => e.stopPropagation());
+      
+      // Botones de formato
+      formatButtons.forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const command = btn.dataset.command;
+          
+          // Asegurar que el foco esté en el editor
+          richEditor.focus();
+          
+          // Ejecutar comando de formato
+          document.execCommand(command, false, null);
+          
+          // Marcar botón como activo si aplica
+          if (['bold', 'italic', 'underline', 'strikeThrough'].includes(command)) {
+            const isActive = document.queryCommandState(command);
+            btn.classList.toggle('active', isActive);
+          }
+        });
+      });
+      
+      // Selector de tamaño de fuente
+      if (fontSizeSelect) {
+        fontSizeSelect.addEventListener("change", (e) => {
+          e.stopPropagation();
+          richEditor.focus();
+          document.execCommand('fontSize', false, e.target.value);
+        });
+      }
+      
+      // Selector de color
+      if (textColorPicker) {
+        textColorPicker.addEventListener("input", (e) => {
+          e.stopPropagation();
+          richEditor.focus();
+          document.execCommand('foreColor', false, e.target.value);
+        });
+      }
+      
+      // Atajos de teclado en el editor
+      richEditor.addEventListener("keydown", (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          switch (e.key.toLowerCase()) {
+            case 'b':
+              e.preventDefault();
+              document.execCommand('bold', false, null);
+              break;
+            case 'i':
+              e.preventDefault();
+              document.execCommand('italic', false, null);
+              break;
+            case 'u':
+              e.preventDefault();
+              document.execCommand('underline', false, null);
+              break;
+          }
+        }
+      });
+    }
+
     // Prevenir propagación de clicks
     input?.addEventListener("click", (e) => e.stopPropagation());
     input?.addEventListener("mousedown", (e) => e.stopPropagation());
@@ -1648,21 +1895,35 @@
     // Guardar
     saveBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      await saveElementChange(el, parsed || { type: 'generic', field: binding }, isImage, isPrice, selectedStyle, binding);
+      // Si hay editor enriquecido, usar su HTML
+      const valueToSave = richEditor ? richEditor.innerHTML : input?.value;
+      await saveElementChange(el, parsed || { type: 'generic', field: binding }, isImage, isPrice, selectedStyle, binding, richEditor ? richEditor.innerHTML : null);
     });
 
-    // Enter para guardar (excepto textarea)
-    if (!isLongText) {
+    // Enter para guardar (excepto textarea y editor enriquecido)
+    if (!isLongText && !richEditor) {
       input?.addEventListener("keydown", async (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          await saveElementChange(el, parsed || { type: 'generic', field: binding }, isImage, isPrice, selectedStyle, binding);
+          await saveElementChange(el, parsed || { type: 'generic', field: binding }, isImage, isPrice, selectedStyle, binding, null);
         }
       });
     }
 
-    input?.focus();
-    input?.select();
+    // Focus en el elemento correcto
+    if (richEditor) {
+      richEditor.focus();
+      // Mover cursor al final
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.selectNodeContents(richEditor);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } else {
+      input?.focus();
+      input?.select();
+    }
   };
 
   // Manejar archivo de imagen
@@ -1696,15 +1957,13 @@
   const previewStyleOnElement = (el, style, originalStyle) => {
     switch (style) {
       case "original":
-        if (originalStyle) {
-          el.style.fontWeight = '';
-          el.style.textTransform = '';
-          el.style.fontFamily = '';
-        }
+        // Restaurar completamente al estado original del HTML
+        restoreOriginalState(el);
         break;
       case "normal":
         el.style.fontWeight = '400';
         el.style.textTransform = 'none';
+        el.style.fontStyle = 'normal';
         break;
       case "bold":
         el.style.fontWeight = '700';
@@ -1712,8 +1971,23 @@
       case "light":
         el.style.fontWeight = '300';
         break;
+      case "italic":
+        el.style.fontStyle = 'italic';
+        break;
       case "uppercase":
         el.style.textTransform = 'uppercase';
+        break;
+      case "lowercase":
+        el.style.textTransform = 'lowercase';
+        break;
+      case "capitalize":
+        el.style.textTransform = 'capitalize';
+        break;
+      case "underline":
+        el.style.textDecoration = 'underline';
+        break;
+      case "line-through":
+        el.style.textDecoration = 'line-through';
         break;
     }
   };
@@ -1961,42 +2235,54 @@
     return false;
   };
 
-  const saveElementChange = async (el, parsed, isImage, isPrice, selectedStyle = "original", binding = "") => {
+  const saveElementChange = async (el, parsed, isImage, isPrice, selectedStyle = "original", binding = "", richHTML = null) => {
     const input = document.getElementById("mineiro-edit-input");
     const textInput = document.getElementById("mineiro-edit-text");
     const saveBtn = document.getElementById("mineiro-save-btn");
-    if (!input) return;
+    const richEditor = document.getElementById("mineiro-rich-editor");
+    
+    if (!input && !richEditor) return;
 
-    let value = input.value;
+    // Obtener valor: priorizar HTML enriquecido si existe
+    let value = richHTML || (richEditor ? richEditor.innerHTML : input?.value);
+    let plainTextValue = richEditor ? richEditor.textContent : input?.value;
+    
     if (isPrice) {
-      value = parseFloat(value) || 0;
+      value = parseFloat(plainTextValue) || 0;
+      plainTextValue = value;
     }
 
     // Guardar valor original para historial
     const originalValue = originalValues.get(el);
     const oldValue = isImage 
       ? (el.tagName.toLowerCase() === "img" ? el.src : el.style.backgroundImage)
-      : el.textContent?.trim();
+      : el.innerHTML || el.textContent?.trim();
+    const oldTextContent = el.textContent?.trim();
 
     saveBtn.innerHTML = `<div class="mineiro-spinner"></div> Guardando...`;
     saveBtn.disabled = true;
 
     try {
-      // Llamar a la API
-      await saveToAPI(parsed, value, el);
+      // Guardar texto plano a la API (sin HTML)
+      await saveToAPI(parsed, plainTextValue, el);
 
-      // Aplicar valor al elemento inmediatamente (preservando estilos)
-      applyValueToElement(el, value, parsed.field);
+      // Aplicar valor al elemento
+      if (richHTML || richEditor) {
+        // Si hay contenido HTML enriquecido, aplicarlo directamente
+        el.innerHTML = value;
+      } else {
+        // Aplicar valor normal
+        applyValueToElement(el, value, parsed.field);
+      }
       
       // Aplicar texto visible si es un enlace
       if (textInput && el.tagName.toLowerCase() === "a") {
         el.textContent = textInput.value;
       }
       
-      // Aplicar estilo seleccionado
-      if (selectedStyle !== "original") {
-        const styleData = { style: selectedStyle };
-        // Guardar estilo aplicado
+      // Aplicar estilo seleccionado (solo si no es "original")
+      if (selectedStyle && selectedStyle !== "original") {
+        previewStyleOnElement(el, selectedStyle, originalStyles.get(el));
         el.dataset.mineiroStyle = selectedStyle;
       }
 
@@ -2021,7 +2307,7 @@
         selectedElement = null;
       }
 
-      log(`✓ Guardado: ${binding || parsed.type}.${parsed.field} = ${value}`);
+      log(`✓ Guardado: ${binding || parsed.type}.${parsed.field} = ${plainTextValue}`);
 
     } catch (error) {
       warn("Error al guardar:", error.message);
