@@ -245,7 +245,40 @@
       return { type: "producto", identifier: productoMatch[1], field: productoMatch[2] };
     }
 
-    return null;
+    // Menu item: "menu-{id}.nombre" o "item-{id}.campo"
+    const menuMatch = binding.match(/^(menu|item)-([a-zA-Z0-9\-_]+)\.(.+)$/);
+    if (menuMatch) {
+      return { type: "producto", identifier: menuMatch[2], field: menuMatch[3] };
+    }
+
+    // Cualquier otro formato con punto: "seccion.campo"
+    if (binding.includes(".")) {
+      const parts = binding.split(".");
+      const section = parts[0];
+      const field = parts.slice(1).join(".");
+      
+      // Mapear secciones comunes a tipos conocidos
+      const sectionMap = {
+        "navbar": "config",
+        "nav": "config",
+        "header": "hero",
+        "banner": "hero",
+        "about": "config",
+        "contact": "footer",
+        "social": "footer",
+        "menu": "config",
+        "services": "config",
+        "features": "config",
+      };
+      
+      return { 
+        type: sectionMap[section] || "config", 
+        field: binding 
+      };
+    }
+
+    // Binding simple sin punto - tratar como config genérico
+    return { type: "config", field: binding };
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -256,24 +289,24 @@
     if (value === undefined || value === null) return false;
 
     const tagName = el.tagName.toLowerCase();
-    const imageFields = ["imagen_url", "imagen", "imagen_fondo", "logo_url", "avatar"];
-    const isImageField = imageFields.some(f => field === f || field.endsWith(`.${f}`));
+    const imageFields = ["imagen_url", "imagen", "imagen_fondo", "logo_url", "avatar", "logo", "foto", "image", "img", "background", "src", "picture"];
+    const isImageField = imageFields.some(f => field === f || field.endsWith(`.${f}`) || field.includes(f));
 
-    if (isImageField) {
+    if (isImageField || (tagName === "img" && value.startsWith && (value.startsWith("http") || value.startsWith("data:")))) {
       if (tagName === "img") {
         el.src = value;
       } else {
         el.style.backgroundImage = `url('${value}')`;
       }
-    } else if (field.endsWith("_url") || field === "url" || field === "link") {
+    } else if (field.endsWith("_url") || field === "url" || field === "link" || field === "href") {
       if (tagName === "a") {
         el.href = value;
       } else {
         el.textContent = value;
       }
-    } else if (field === "precio" || field.endsWith(".precio")) {
+    } else if (field === "precio" || field.endsWith(".precio") || field === "price") {
       el.textContent = typeof value === "number" ? formatCLP(value) : value;
-    } else if (field === "rating") {
+    } else if (field === "rating" || field === "estrellas") {
       const stars = parseInt(value, 10) || 0;
       el.textContent = "★".repeat(stars) + "☆".repeat(Math.max(0, 5 - stars));
     } else {
@@ -629,12 +662,164 @@
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     ADMIN MODE - Visual Inline Editing
+     ADMIN MODE - Visual Inline Editing v2.0
+     Con: Deshacer, Subida de imágenes, Ocultar barra, Preservar estilos
      ───────────────────────────────────────────────────────────────────────── */
 
   let adminMode = false;
   let selectedElement = null;
   let pendingChanges = new Map();
+  let adminBarVisible = true;
+  
+  // Sistema de historial para deshacer cambios
+  const changeHistory = [];
+  const MAX_HISTORY = 50;
+  
+  // Almacenar estilos originales de elementos
+  const originalStyles = new WeakMap();
+  const originalValues = new WeakMap();
+
+  // Guardar estado original antes de editar
+  const saveOriginalState = (el) => {
+    if (!originalValues.has(el)) {
+      const tagName = el.tagName.toLowerCase();
+      const computedStyle = window.getComputedStyle(el);
+      
+      originalValues.set(el, {
+        textContent: el.textContent,
+        innerHTML: el.innerHTML,
+        src: el.src || null,
+        backgroundImage: el.style.backgroundImage || null,
+      });
+      
+      originalStyles.set(el, {
+        fontFamily: computedStyle.fontFamily,
+        fontSize: computedStyle.fontSize,
+        fontWeight: computedStyle.fontWeight,
+        fontStyle: computedStyle.fontStyle,
+        color: computedStyle.color,
+        textTransform: computedStyle.textTransform,
+        letterSpacing: computedStyle.letterSpacing,
+        lineHeight: computedStyle.lineHeight,
+      });
+    }
+  };
+
+  // Agregar cambio al historial
+  const addToHistory = (el, binding, oldValue, newValue, field) => {
+    changeHistory.push({
+      element: el,
+      binding,
+      oldValue,
+      newValue,
+      field,
+      timestamp: Date.now(),
+      styles: originalStyles.get(el),
+    });
+    
+    if (changeHistory.length > MAX_HISTORY) {
+      changeHistory.shift();
+    }
+    
+    updateUndoButton();
+  };
+
+  // Deshacer último cambio
+  const undoLastChange = async () => {
+    if (changeHistory.length === 0) {
+      log("No hay cambios para deshacer");
+      return;
+    }
+
+    const lastChange = changeHistory.pop();
+    const { element, binding, oldValue, field, styles } = lastChange;
+
+    log(`Deshaciendo: ${binding} -> "${oldValue}"`);
+
+    // Restaurar valor visual
+    applyValueToElement(element, oldValue, field);
+    
+    // Restaurar estilos originales si existen
+    if (styles) {
+      Object.keys(styles).forEach(prop => {
+        if (styles[prop]) {
+          element.style[prop] = '';
+        }
+      });
+    }
+
+    // Enviar cambio a la API
+    const parsed = parseBinding(binding);
+    if (parsed) {
+      try {
+        await saveToAPI(parsed, oldValue, element, true);
+        log("✓ Cambio deshecho y guardado");
+      } catch (err) {
+        warn("Error al deshacer en servidor:", err.message);
+      }
+    }
+
+    updateUndoButton();
+  };
+
+  const updateUndoButton = () => {
+    const undoBtn = document.getElementById("mineiro-undo-btn");
+    if (undoBtn) {
+      const count = changeHistory.length;
+      undoBtn.style.display = count > 0 ? "flex" : "none";
+      undoBtn.innerHTML = `↩️ Deshacer ${count > 1 ? `(${count})` : ''}`;
+    }
+  };
+
+  // Subir imagen a Supabase Storage
+  const uploadImageToStorage = async (file) => {
+    if (!supabase) {
+      throw new Error("Supabase no inicializado");
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `uploads/${tiendaData?.id || 'public'}/${fileName}`;
+
+    log(`Subiendo imagen: ${file.name} -> ${filePath}`);
+
+    const { data, error } = await supabase.storage
+      .from('images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (error) {
+      // Intentar con bucket público alternativo
+      const { data: data2, error: error2 } = await supabase.storage
+        .from('public')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+      
+      if (error2) {
+        throw new Error(`Error al subir imagen: ${error.message}`);
+      }
+      
+      const { data: urlData } = supabase.storage.from('public').getPublicUrl(filePath);
+      return urlData.publicUrl;
+    }
+
+    const { data: urlData } = supabase.storage.from('images').getPublicUrl(filePath);
+    return urlData.publicUrl;
+  };
+
+  // Convertir archivo a base64 como fallback
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
 
   const enableAdminMode = () => {
     if (adminMode) return;
@@ -644,26 +829,28 @@
     const style = document.createElement("style");
     style.id = "mineiro-admin-styles";
     style.textContent = `
+      /* Elementos editables */
       [data-mineiro-bind] {
-        position: relative;
-        cursor: pointer;
-        transition: all 0.2s ease;
+        cursor: pointer !important;
+        transition: outline 0.2s ease, outline-offset 0.2s ease !important;
       }
       [data-mineiro-bind]:hover {
         outline: 2px dashed #f59e0b !important;
-        outline-offset: 2px;
+        outline-offset: 3px !important;
       }
       [data-mineiro-bind].mineiro-selected {
         outline: 3px solid #06b6d4 !important;
-        outline-offset: 3px;
+        outline-offset: 4px !important;
       }
-      [data-mineiro-bind]::after {
-        content: '';
+      
+      /* Indicador de editable - más sutil */
+      [data-mineiro-bind]::before {
+        content: '✏️';
         position: absolute;
-        top: -8px;
-        right: -8px;
-        width: 20px;
-        height: 20px;
+        top: -12px;
+        right: -12px;
+        width: 24px;
+        height: 24px;
         background: #f59e0b;
         border-radius: 50%;
         opacity: 0;
@@ -672,18 +859,15 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 10px;
-        color: #000;
+        font-size: 12px;
+        z-index: 1000;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
       }
-      [data-mineiro-bind]:hover::after {
-        opacity: 0.8;
-        content: '✏️';
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 20px;
-        text-align: center;
+      [data-mineiro-bind]:hover::before {
+        opacity: 1;
       }
+      
+      /* Barra de administración */
       .mineiro-admin-bar {
         position: fixed;
         top: 0;
@@ -695,10 +879,14 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 20px;
-        z-index: 999999;
-        font-family: system-ui, -apple-system, sans-serif;
+        padding: 0 16px;
+        z-index: 9999999;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        transition: transform 0.3s ease;
+      }
+      .mineiro-admin-bar.hidden {
+        transform: translateY(-100%);
       }
       .mineiro-admin-bar * {
         box-sizing: border-box;
@@ -709,27 +897,34 @@
         gap: 8px;
         color: #f59e0b;
         font-weight: 700;
-        font-size: 18px;
+        font-size: 16px;
+      }
+      .mineiro-admin-center {
+        display: flex;
+        align-items: center;
+        gap: 12px;
       }
       .mineiro-admin-hint {
         color: #94a3b8;
-        font-size: 14px;
+        font-size: 13px;
       }
       .mineiro-admin-actions {
         display: flex;
-        gap: 10px;
+        gap: 8px;
+        align-items: center;
       }
       .mineiro-admin-btn {
-        padding: 10px 20px;
-        border-radius: 10px;
-        font-size: 14px;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-size: 13px;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.15s;
         border: none;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
+        white-space: nowrap;
       }
       .mineiro-admin-btn-primary {
         background: linear-gradient(135deg, #06b6d4, #8b5cf6);
@@ -743,31 +938,92 @@
         background: linear-gradient(135deg, #10b981, #059669);
         color: white;
       }
+      .mineiro-admin-btn-warning {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: white;
+      }
+      .mineiro-admin-btn-danger {
+        background: #dc2626;
+        color: white;
+      }
       .mineiro-admin-btn:hover {
         filter: brightness(1.1);
         transform: translateY(-1px);
       }
+      .mineiro-admin-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+      
+      /* Botón flotante para mostrar barra */
+      .mineiro-show-bar-btn {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        z-index: 9999998;
+        padding: 10px 16px;
+        background: linear-gradient(135deg, #0f172a, #1e293b);
+        border: 2px solid #f59e0b;
+        border-radius: 10px;
+        color: #f59e0b;
+        font-weight: 600;
+        font-size: 14px;
+        cursor: pointer;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        font-family: system-ui, sans-serif;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        transition: all 0.2s;
+      }
+      .mineiro-show-bar-btn:hover {
+        background: #1e293b;
+        transform: scale(1.05);
+      }
+      .mineiro-show-bar-btn.visible {
+        display: flex;
+      }
+      
+      /* Popup de edición mejorado */
       .mineiro-edit-popup {
         position: fixed;
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border: 2px solid #334155;
+        border: 2px solid #475569;
         border-radius: 16px;
         padding: 20px;
-        min-width: 320px;
-        max-width: 450px;
-        box-shadow: 0 25px 50px rgba(0,0,0,0.5);
-        z-index: 999999;
-        font-family: system-ui, -apple-system, sans-serif;
+        min-width: 340px;
+        max-width: 420px;
+        box-shadow: 0 25px 60px rgba(0,0,0,0.6);
+        z-index: 99999999;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        max-height: 90vh;
+        overflow-y: auto;
       }
       .mineiro-edit-popup h3 {
         margin: 0 0 4px 0;
         color: #f1f5f9;
         font-size: 16px;
         font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .mineiro-edit-popup .close-btn {
+        background: none;
+        border: none;
+        color: #64748b;
+        font-size: 20px;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+      }
+      .mineiro-edit-popup .close-btn:hover {
+        color: #ef4444;
       }
       .mineiro-edit-popup .edit-type {
         color: #94a3b8;
-        font-size: 12px;
+        font-size: 11px;
         margin-bottom: 16px;
         padding: 4px 10px;
         background: #334155;
@@ -775,19 +1031,22 @@
         display: inline-block;
       }
       .mineiro-edit-popup input,
-      .mineiro-edit-popup textarea {
+      .mineiro-edit-popup textarea,
+      .mineiro-edit-popup select {
         width: 100%;
         padding: 12px 14px;
         border-radius: 10px;
         border: 2px solid #475569;
         background: #0f172a;
         color: #f1f5f9;
-        font-size: 15px;
+        font-size: 14px;
         margin-top: 8px;
         transition: border-color 0.2s;
+        font-family: inherit;
       }
       .mineiro-edit-popup input:focus,
-      .mineiro-edit-popup textarea:focus {
+      .mineiro-edit-popup textarea:focus,
+      .mineiro-edit-popup select:focus {
         outline: none;
         border-color: #06b6d4;
       }
@@ -796,42 +1055,155 @@
         resize: vertical;
       }
       .mineiro-edit-popup label {
-        font-size: 13px;
+        font-size: 12px;
         color: #94a3b8;
         font-weight: 500;
+        display: block;
+        margin-top: 12px;
+      }
+      .mineiro-edit-popup label:first-of-type {
+        margin-top: 0;
       }
       .mineiro-edit-actions {
         display: flex;
-        gap: 10px;
+        gap: 8px;
         margin-top: 16px;
       }
+      
+      /* Preview de imagen mejorado */
       .mineiro-image-preview {
         width: 100%;
-        height: 120px;
+        height: 140px;
         border-radius: 10px;
         background: #0f172a;
         border: 2px dashed #475569;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
         overflow: hidden;
-        margin-bottom: 10px;
+        margin-bottom: 12px;
+        cursor: pointer;
+        transition: border-color 0.2s, background 0.2s;
+        position: relative;
+      }
+      .mineiro-image-preview:hover {
+        border-color: #06b6d4;
+        background: #1e293b;
       }
       .mineiro-image-preview img {
         max-width: 100%;
         max-height: 100%;
         object-fit: contain;
       }
+      .mineiro-image-preview .upload-hint {
+        color: #64748b;
+        font-size: 13px;
+        text-align: center;
+        padding: 10px;
+      }
+      .mineiro-image-preview .upload-hint strong {
+        color: #06b6d4;
+        display: block;
+        margin-bottom: 4px;
+      }
+      .mineiro-image-preview.dragover {
+        border-color: #10b981;
+        background: rgba(16, 185, 129, 0.1);
+      }
+      .mineiro-file-input {
+        display: none;
+      }
+      
+      /* Selector de estilos */
+      .mineiro-style-options {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .mineiro-style-btn {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid #475569;
+        background: #1e293b;
+        color: #e2e8f0;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .mineiro-style-btn:hover {
+        border-color: #06b6d4;
+        background: #334155;
+      }
+      .mineiro-style-btn.active {
+        border-color: #06b6d4;
+        background: #06b6d4;
+        color: #0f172a;
+      }
+      
+      /* Tabs de opciones */
+      .mineiro-tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 16px;
+        border-bottom: 1px solid #334155;
+        padding-bottom: 8px;
+      }
+      .mineiro-tab {
+        padding: 6px 12px;
+        border-radius: 6px 6px 0 0;
+        border: none;
+        background: transparent;
+        color: #94a3b8;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .mineiro-tab:hover {
+        color: #e2e8f0;
+        background: #334155;
+      }
+      .mineiro-tab.active {
+        color: #06b6d4;
+        background: #334155;
+      }
+      .mineiro-tab-content {
+        display: none;
+      }
+      .mineiro-tab-content.active {
+        display: block;
+      }
+      
+      /* Ajuste del body cuando la barra está visible */
       body.mineiro-admin-active {
         padding-top: 56px !important;
       }
+      body.mineiro-admin-active.bar-hidden {
+        padding-top: 0 !important;
+      }
+      
+      /* Badge de cambios */
       .mineiro-changes-badge {
         background: #ef4444;
         color: white;
-        font-size: 11px;
-        padding: 2px 8px;
+        font-size: 10px;
+        padding: 2px 6px;
         border-radius: 10px;
-        margin-left: 8px;
+        margin-left: 6px;
+      }
+      
+      /* Loading spinner */
+      .mineiro-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid transparent;
+        border-top-color: currentColor;
+        border-radius: 50%;
+        animation: mineiro-spin 0.8s linear infinite;
+      }
+      @keyframes mineiro-spin {
+        to { transform: rotate(360deg); }
       }
     `;
     document.head.appendChild(style);
@@ -839,28 +1211,92 @@
     // Create admin bar
     const adminBar = document.createElement("div");
     adminBar.className = "mineiro-admin-bar";
+    adminBar.id = "mineiro-admin-bar";
     adminBar.innerHTML = `
       <div class="mineiro-admin-logo">
         <span>⚡</span>
         <span>Mineiro Editor</span>
       </div>
-      <div class="mineiro-admin-hint">Haz clic en cualquier elemento para editarlo</div>
+      <div class="mineiro-admin-center">
+        <div class="mineiro-admin-hint">Haz clic en cualquier elemento para editarlo</div>
+        <button class="mineiro-admin-btn mineiro-admin-btn-warning" id="mineiro-undo-btn" style="display:none">
+          ↩️ Deshacer
+        </button>
+      </div>
       <div class="mineiro-admin-actions">
+        <button class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-hide-bar-btn" title="Ocultar barra">
+          👁️ Ocultar
+        </button>
         <button class="mineiro-admin-btn mineiro-admin-btn-secondary" onclick="window.MineiroAdmin.openDashboard()">
-          📊 Panel Completo
+          📊 Panel
         </button>
         <button class="mineiro-admin-btn mineiro-admin-btn-primary" onclick="window.MineiroAdmin.disable()">
-          ✓ Salir del Editor
+          ✓ Salir
         </button>
       </div>
     `;
     document.body.prepend(adminBar);
     document.body.classList.add("mineiro-admin-active");
 
+    // Botón flotante para mostrar la barra
+    const showBarBtn = document.createElement("button");
+    showBarBtn.className = "mineiro-show-bar-btn";
+    showBarBtn.id = "mineiro-show-bar-btn";
+    showBarBtn.innerHTML = "⚡ Mostrar Editor";
+    showBarBtn.onclick = () => toggleAdminBar(true);
+    document.body.appendChild(showBarBtn);
+
+    // Event listeners para la barra
+    document.getElementById("mineiro-hide-bar-btn").onclick = () => toggleAdminBar(false);
+    document.getElementById("mineiro-undo-btn").onclick = undoLastChange;
+
     // Add click listener for editing
     document.addEventListener("click", handleAdminClick, true);
 
+    // Keyboard shortcuts
+    document.addEventListener("keydown", handleKeyboardShortcuts);
+
     log("Modo admin activado - Haz clic en cualquier elemento con data-mineiro-bind para editarlo");
+    log("Atajos: Ctrl+Z para deshacer, Escape para cerrar popup");
+  };
+
+  const toggleAdminBar = (show) => {
+    const adminBar = document.getElementById("mineiro-admin-bar");
+    const showBtn = document.getElementById("mineiro-show-bar-btn");
+    
+    adminBarVisible = show;
+    
+    if (show) {
+      adminBar.classList.remove("hidden");
+      showBtn.classList.remove("visible");
+      document.body.classList.remove("bar-hidden");
+    } else {
+      adminBar.classList.add("hidden");
+      showBtn.classList.add("visible");
+      document.body.classList.add("bar-hidden");
+    }
+  };
+
+  const handleKeyboardShortcuts = (e) => {
+    // Ctrl+Z para deshacer
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+      if (changeHistory.length > 0 && adminMode) {
+        e.preventDefault();
+        undoLastChange();
+      }
+    }
+    
+    // Escape para cerrar popup
+    if (e.key === "Escape") {
+      const popup = document.querySelector(".mineiro-edit-popup");
+      if (popup) {
+        popup.remove();
+        if (selectedElement) {
+          selectedElement.classList.remove("mineiro-selected");
+          selectedElement = null;
+        }
+      }
+    }
   };
 
   const disableAdminMode = () => {
@@ -868,10 +1304,12 @@
     adminMode = false;
 
     document.getElementById("mineiro-admin-styles")?.remove();
-    document.querySelector(".mineiro-admin-bar")?.remove();
+    document.getElementById("mineiro-admin-bar")?.remove();
+    document.getElementById("mineiro-show-bar-btn")?.remove();
     document.querySelector(".mineiro-edit-popup")?.remove();
-    document.body.classList.remove("mineiro-admin-active");
+    document.body.classList.remove("mineiro-admin-active", "bar-hidden");
     document.removeEventListener("click", handleAdminClick, true);
+    document.removeEventListener("keydown", handleKeyboardShortcuts);
 
     if (selectedElement) {
       selectedElement.classList.remove("mineiro-selected");
@@ -882,19 +1320,19 @@
   };
 
   const handleAdminClick = (e) => {
-    // Ignore clicks inside popup
+    // Ignorar clics en popup
     if (e.target.closest(".mineiro-edit-popup")) {
       return;
     }
 
-    // Ignore clicks on admin bar
-    if (e.target.closest(".mineiro-admin-bar")) {
+    // Ignorar clics en barra de admin
+    if (e.target.closest(".mineiro-admin-bar") || e.target.closest(".mineiro-show-bar-btn")) {
       return;
     }
 
     const el = e.target.closest("[data-mineiro-bind]");
     if (!el) {
-      // Click outside editable elements - close popup
+      // Clic fuera de elementos editables - cerrar popup
       document.querySelector(".mineiro-edit-popup")?.remove();
       if (selectedElement) {
         selectedElement.classList.remove("mineiro-selected");
@@ -906,13 +1344,16 @@
     e.preventDefault();
     e.stopPropagation();
 
-    // Deselect previous
+    // Deseleccionar anterior
     if (selectedElement) {
       selectedElement.classList.remove("mineiro-selected");
     }
 
     selectedElement = el;
     el.classList.add("mineiro-selected");
+
+    // Guardar estado original
+    saveOriginalState(el);
 
     showEditPopup(el);
   };
@@ -924,25 +1365,38 @@
     const parsed = parseBinding(binding);
     
     if (!parsed) {
-      warn("No se pudo parsear el binding:", binding);
-      return;
+      // Intentar editar como elemento genérico
+      log(`Binding no reconocido: ${binding}, editando como texto genérico`);
     }
 
-    // Determine current value and type
+    // Determinar tipo de contenido
     const tagName = el.tagName.toLowerCase();
     let currentValue = "";
     let isImage = false;
     let isLongText = false;
     let isPrice = false;
+    let isLink = false;
 
-    const imageFields = ["imagen_url", "imagen", "imagen_fondo", "logo_url", "avatar"];
-    isImage = imageFields.some(f => parsed.field === f || parsed.field.endsWith(`.${f}`)) || tagName === "img";
-    isPrice = parsed.field === "precio" || parsed.field.endsWith(".precio");
+    const imageFields = ["imagen_url", "imagen", "imagen_fondo", "logo_url", "avatar", "logo", "foto", "image", "img", "background", "src"];
+    const priceFields = ["precio", "price", "costo", "cost", "valor"];
+    const linkFields = ["url", "link", "href", "enlace"];
+    
+    const field = parsed?.field || binding;
+    
+    isImage = imageFields.some(f => field === f || field.endsWith(`.${f}`) || field.includes(f)) || tagName === "img";
+    isPrice = priceFields.some(f => field === f || field.endsWith(`.${f}`));
+    isLink = linkFields.some(f => field === f || field.endsWith(`.${f}`)) || tagName === "a";
 
     if (isImage) {
-      currentValue = tagName === "img" 
-        ? el.src 
-        : el.style.backgroundImage.replace(/url\(['"]?(.+?)['"]?\)/i, "$1");
+      if (tagName === "img") {
+        currentValue = el.src || "";
+      } else {
+        const bg = el.style.backgroundImage || window.getComputedStyle(el).backgroundImage;
+        currentValue = bg.replace(/url\(['"]?(.+?)['"]?\)/i, "$1") || "";
+        if (currentValue === "none") currentValue = "";
+      }
+    } else if (isLink && tagName === "a") {
+      currentValue = el.href || "";
     } else {
       currentValue = el.textContent?.trim() || "";
       if (isPrice) {
@@ -950,78 +1404,140 @@
       }
     }
 
-    isLongText = !isImage && !isPrice && currentValue.length > 50;
+    isLongText = !isImage && !isPrice && !isLink && currentValue.length > 60;
 
-    // Position popup - SIEMPRE cerca del elemento
+    // Obtener estilos actuales del elemento
+    const computedStyle = window.getComputedStyle(el);
+    const currentStyles = {
+      fontFamily: computedStyle.fontFamily,
+      fontSize: computedStyle.fontSize,
+      fontWeight: computedStyle.fontWeight,
+    };
+
+    // Posicionar popup cerca del elemento con scroll
     const rect = el.getBoundingClientRect();
+    const scrollY = window.scrollY || document.documentElement.scrollTop;
+    const scrollX = window.scrollX || document.documentElement.scrollLeft;
+    
     const popup = document.createElement("div");
     popup.className = "mineiro-edit-popup";
     
-    // Calcular posición centrada horizontalmente respecto al elemento
-    let left = rect.left + (rect.width / 2) - 175; // 175 = mitad del ancho del popup (350/2)
-    let top = rect.bottom + 10; // 10px debajo del elemento
+    // Calcular posición óptima
+    const popupWidth = 380;
+    const popupHeight = isImage ? 400 : (isLongText ? 350 : 300);
     
-    // Ajustar si se sale por la derecha
-    if (left + 350 > window.innerWidth) {
-      left = window.innerWidth - 360;
-    }
-    // Ajustar si se sale por la izquierda
-    if (left < 10) {
-      left = 10;
-    }
+    let left = rect.left + scrollX + (rect.width / 2) - (popupWidth / 2);
+    let top = rect.bottom + scrollY + 15;
     
-    // Si no cabe abajo, ponerlo arriba del elemento
-    const popupHeight = 280; // altura aproximada
-    if (top + popupHeight > window.innerHeight) {
-      top = rect.top - popupHeight - 10;
-    }
+    // Ajustar si se sale de la pantalla
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
     
-    // Si tampoco cabe arriba, ponerlo en el centro de la pantalla
-    if (top < 70) {
-      top = Math.max(70, (window.innerHeight - popupHeight) / 2);
-      left = Math.max(10, (window.innerWidth - 350) / 2);
+    if (left + popupWidth > viewportWidth - 20) {
+      left = viewportWidth - popupWidth - 20;
+    }
+    if (left < 20) {
+      left = 20;
     }
     
-    popup.style.position = "fixed"; // Usar fixed en lugar de absolute
-    popup.style.top = `${top}px`;
+    // Si no cabe abajo, ponerlo arriba
+    if (rect.bottom + popupHeight > viewportHeight - 20) {
+      top = rect.top + scrollY - popupHeight - 15;
+    }
+    
+    // Si tampoco cabe arriba, centrar en viewport
+    if (top < scrollY + (adminBarVisible ? 70 : 20)) {
+      top = scrollY + (viewportHeight - popupHeight) / 2;
+      left = scrollX + (viewportWidth - popupWidth) / 2;
+    }
+    
+    popup.style.position = "absolute";
+    popup.style.top = `${Math.max(scrollY + 20, top)}px`;
     popup.style.left = `${left}px`;
-    popup.style.zIndex = "9999999";
+    popup.style.width = `${popupWidth}px`;
 
-    // Type label for UI
+    // Labels para UI
     const typeLabels = {
       config: "Configuración",
       hero: "Hero / Banner",
       footer: "Footer",
       "testimonios-config": "Config. Testimonios",
       testimonio: "Testimonio",
-      producto: "Producto"
+      producto: "Producto",
+      menu: "Menú",
+      item: "Item"
     };
-    const typeLabel = typeLabels[parsed.type] || "Elemento";
-    const fieldLabel = parsed.field.replace(/_/g, " ").replace(/\./g, " › ");
+    const typeLabel = typeLabels[parsed?.type] || "Elemento";
+    const fieldLabel = field.replace(/_/g, " ").replace(/\./g, " › ").replace(/-/g, " ");
 
-    // Escape values for HTML
+    // Escape valores para HTML
     const escapedValue = (currentValue || "").toString().replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-    popup.innerHTML = `
-      <h3>Editar contenido</h3>
-      <div class="edit-type">${typeLabel} › ${fieldLabel}</div>
-      
-      ${isImage ? `
-        <div class="mineiro-image-preview">
-          ${currentValue ? `<img src="${escapedValue}" alt="Preview" />` : '<span style="color:#64748b">Sin imagen</span>'}
+    // Generar HTML del popup
+    let contentHTML = "";
+    
+    if (isImage) {
+      contentHTML = `
+        <div class="mineiro-image-preview" id="mineiro-image-drop">
+          ${currentValue ? `<img src="${escapedValue}" alt="Preview" />` : `
+            <div class="upload-hint">
+              <strong>📷 Arrastra una imagen aquí</strong>
+              o haz clic para seleccionar
+            </div>
+          `}
         </div>
-        <label>URL de la imagen</label>
+        <input type="file" accept="image/*" class="mineiro-file-input" id="mineiro-file-input" />
+        <label>O ingresa URL de imagen</label>
         <input type="url" id="mineiro-edit-input" value="${escapedValue}" placeholder="https://..." />
-      ` : isLongText ? `
+      `;
+    } else if (isLongText) {
+      contentHTML = `
         <label>Texto</label>
         <textarea id="mineiro-edit-input">${currentValue || ""}</textarea>
-      ` : isPrice ? `
+        
+        <label>Estilo de texto</label>
+        <div class="mineiro-style-options">
+          <button type="button" class="mineiro-style-btn active" data-style="original">Original</button>
+          <button type="button" class="mineiro-style-btn" data-style="normal">Normal</button>
+          <button type="button" class="mineiro-style-btn" data-style="bold">Negrita</button>
+          <button type="button" class="mineiro-style-btn" data-style="light">Ligero</button>
+        </div>
+      `;
+    } else if (isPrice) {
+      contentHTML = `
         <label>Precio (solo número)</label>
-        <input type="number" id="mineiro-edit-input" value="${escapedValue}" placeholder="1000" />
-      ` : `
+        <input type="number" id="mineiro-edit-input" value="${escapedValue}" placeholder="1000" step="100" />
+      `;
+    } else if (isLink) {
+      contentHTML = `
+        <label>URL / Enlace</label>
+        <input type="url" id="mineiro-edit-input" value="${escapedValue}" placeholder="https://..." />
+        <label>Texto visible</label>
+        <input type="text" id="mineiro-edit-text" value="${el.textContent?.trim() || ''}" placeholder="Texto del enlace" />
+      `;
+    } else {
+      contentHTML = `
         <label>Contenido</label>
         <input type="text" id="mineiro-edit-input" value="${escapedValue}" />
-      `}
+        
+        <label>Estilo de texto</label>
+        <div class="mineiro-style-options">
+          <button type="button" class="mineiro-style-btn active" data-style="original">Original</button>
+          <button type="button" class="mineiro-style-btn" data-style="normal">Normal</button>
+          <button type="button" class="mineiro-style-btn" data-style="bold">Negrita</button>
+          <button type="button" class="mineiro-style-btn" data-style="uppercase">MAYÚSCULAS</button>
+        </div>
+      `;
+    }
+
+    popup.innerHTML = `
+      <h3>
+        Editar contenido
+        <button type="button" class="close-btn" id="mineiro-close-popup">&times;</button>
+      </h3>
+      <div class="edit-type">${typeLabel} › ${fieldLabel}</div>
+      
+      ${contentHTML}
       
       <div class="mineiro-edit-actions">
         <button type="button" class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-cancel-btn" style="flex:1">
@@ -1035,54 +1551,419 @@
 
     document.body.appendChild(popup);
 
+    // Scroll al popup si no es visible
+    const popupRect = popup.getBoundingClientRect();
+    if (popupRect.top < 0 || popupRect.bottom > viewportHeight) {
+      popup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
     // Event listeners
     const input = document.getElementById("mineiro-edit-input");
     const cancelBtn = document.getElementById("mineiro-cancel-btn");
     const saveBtn = document.getElementById("mineiro-save-btn");
+    const closeBtn = document.getElementById("mineiro-close-popup");
+    const fileInput = document.getElementById("mineiro-file-input");
+    const imageDrop = document.getElementById("mineiro-image-drop");
 
-    // Update image preview on input
-    if (isImage) {
-      input.addEventListener("input", () => {
-        const preview = popup.querySelector(".mineiro-image-preview");
-        if (preview && input.value) {
-          preview.innerHTML = `<img src="${escapeHtml(input.value)}" alt="Preview" onerror="this.style.display='none'" />`;
-        }
-      });
-    }
-
-    input.addEventListener("click", (e) => e.stopPropagation());
-    input.addEventListener("mousedown", (e) => e.stopPropagation());
-
-    cancelBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    // Cerrar popup
+    const closePopup = () => {
       popup.remove();
       if (selectedElement) {
         selectedElement.classList.remove("mineiro-selected");
         selectedElement = null;
       }
-    });
+    };
 
-    saveBtn.addEventListener("click", (e) => {
+    closeBtn?.addEventListener("click", (e) => {
       e.stopPropagation();
-      saveElementChange(el, parsed, isImage, isPrice);
+      closePopup();
     });
 
-    // Enter to save (except textarea)
-    if (!isLongText) {
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          saveElementChange(el, parsed, isImage, isPrice);
+    cancelBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closePopup();
+    });
+
+    // Manejo de imágenes
+    if (isImage) {
+      // Click para seleccionar archivo
+      imageDrop?.addEventListener("click", () => fileInput?.click());
+      
+      // Drag and drop
+      imageDrop?.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        imageDrop.classList.add("dragover");
+      });
+      
+      imageDrop?.addEventListener("dragleave", () => {
+        imageDrop.classList.remove("dragover");
+      });
+      
+      imageDrop?.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        imageDrop.classList.remove("dragover");
+        
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith("image/")) {
+          await handleImageFile(file, imageDrop, input);
+        }
+      });
+      
+      // File input change
+      fileInput?.addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          await handleImageFile(file, imageDrop, input);
+        }
+      });
+      
+      // URL input change
+      input?.addEventListener("input", () => {
+        if (input.value && imageDrop) {
+          imageDrop.innerHTML = `<img src="${escapeHtml(input.value)}" alt="Preview" onerror="this.parentElement.innerHTML='<div class=\\'upload-hint\\'>❌ Error al cargar imagen</div>'" />`;
         }
       });
     }
 
-    input.focus();
-    input.select();
+    // Manejo de estilos de texto
+    const styleButtons = popup.querySelectorAll(".mineiro-style-btn");
+    let selectedStyle = "original";
+    
+    styleButtons.forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        styleButtons.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedStyle = btn.dataset.style;
+        
+        // Preview del estilo en el elemento
+        previewStyleOnElement(el, selectedStyle, originalStyles.get(el));
+      });
+    });
+
+    // Prevenir propagación de clicks
+    input?.addEventListener("click", (e) => e.stopPropagation());
+    input?.addEventListener("mousedown", (e) => e.stopPropagation());
+
+    // Guardar
+    saveBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await saveElementChange(el, parsed || { type: 'generic', field: binding }, isImage, isPrice, selectedStyle, binding);
+    });
+
+    // Enter para guardar (excepto textarea)
+    if (!isLongText) {
+      input?.addEventListener("keydown", async (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          await saveElementChange(el, parsed || { type: 'generic', field: binding }, isImage, isPrice, selectedStyle, binding);
+        }
+      });
+    }
+
+    input?.focus();
+    input?.select();
   };
 
-  const saveElementChange = async (el, parsed, isImage, isPrice) => {
+  // Manejar archivo de imagen
+  const handleImageFile = async (file, previewContainer, urlInput) => {
+    previewContainer.innerHTML = `<div class="upload-hint"><div class="mineiro-spinner"></div><br>Subiendo imagen...</div>`;
+    
+    try {
+      // Intentar subir a Supabase Storage
+      const imageUrl = await uploadImageToStorage(file);
+      
+      previewContainer.innerHTML = `<img src="${imageUrl}" alt="Preview" />`;
+      urlInput.value = imageUrl;
+      log("✓ Imagen subida:", imageUrl);
+      
+    } catch (err) {
+      warn("Error al subir a Storage, usando base64:", err.message);
+      
+      // Fallback: convertir a base64
+      try {
+        const base64 = await fileToBase64(file);
+        previewContainer.innerHTML = `<img src="${base64}" alt="Preview" />`;
+        urlInput.value = base64;
+        log("✓ Imagen convertida a base64");
+      } catch (err2) {
+        previewContainer.innerHTML = `<div class="upload-hint">❌ Error: ${err2.message}</div>`;
+      }
+    }
+  };
+
+  // Preview de estilo en elemento
+  const previewStyleOnElement = (el, style, originalStyle) => {
+    switch (style) {
+      case "original":
+        if (originalStyle) {
+          el.style.fontWeight = '';
+          el.style.textTransform = '';
+          el.style.fontFamily = '';
+        }
+        break;
+      case "normal":
+        el.style.fontWeight = '400';
+        el.style.textTransform = 'none';
+        break;
+      case "bold":
+        el.style.fontWeight = '700';
+        break;
+      case "light":
+        el.style.fontWeight = '300';
+        break;
+      case "uppercase":
+        el.style.textTransform = 'uppercase';
+        break;
+    }
+  };
+
+  // Función auxiliar para guardar a la API
+  const saveToAPI = async (parsed, value, el, isUndo = false) => {
+    let apiPayload = null;
+    
+    switch (parsed.type) {
+      case "config":
+      case "hero":
+      case "footer":
+      case "testimonios-config": {
+        if (!tiendaData || !tiendaData.id) {
+          throw new Error("Tienda no configurada");
+        }
+        
+        const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+        
+        if (parsed.type === "config") {
+          if (!siteConfig.config) siteConfig.config = {};
+          setNestedValue(siteConfig.config, parsed.field, value);
+        } else if (parsed.type === "hero") {
+          if (!siteConfig.hero) siteConfig.hero = {};
+          setNestedValue(siteConfig.hero, parsed.field, value);
+        } else if (parsed.type === "footer") {
+          if (!siteConfig.footer) siteConfig.footer = {};
+          setNestedValue(siteConfig.footer, parsed.field, value);
+        } else if (parsed.type === "testimonios-config") {
+          if (!siteConfig.testimonios_config) siteConfig.testimonios_config = {};
+          setNestedValue(siteConfig.testimonios_config, parsed.field, value);
+        }
+
+        apiPayload = {
+          action: "update",
+          table: "tiendas",
+          data: { site_config: siteConfig },
+          where: { id: tiendaData.id }
+        };
+        
+        tiendaData.site_config = siteConfig;
+        break;
+      }
+
+      case "producto": {
+        let producto = productosCache.find(p => p.dom_id === parsed.identifier)
+                    || productosCache.find(p => String(p.id) === parsed.identifier);
+        
+        if (!producto && el) {
+          const container = el.closest('[data-mineiro-bind*="producto-"]') 
+                         || el.closest('.product-card, .producto, [class*="product"], [class*="producto"], [class*="menu-item"], [class*="item"]')
+                         || el.parentElement?.parentElement;
+          
+          if (container) {
+            const nombreEl = container.querySelector('[data-mineiro-bind*=".nombre"]')
+                          || container.querySelector('h1, h2, h3, h4, h5, .product-name, .nombre-producto, .item-name');
+            
+            if (nombreEl) {
+              const nombreTexto = nombreEl.textContent?.trim().toLowerCase();
+              if (nombreTexto) {
+                producto = productosCache.find(p => 
+                  p.nombre?.toLowerCase().includes(nombreTexto) || 
+                  nombreTexto.includes(p.nombre?.toLowerCase())
+                );
+              }
+            }
+          }
+          
+          if (!producto && parsed.identifier) {
+            const searchName = parsed.identifier.replace(/-/g, ' ').toLowerCase();
+            producto = productosCache.find(p => 
+              p.nombre?.toLowerCase().includes(searchName) ||
+              searchName.includes(p.nombre?.toLowerCase())
+            );
+          }
+        }
+        
+        if (!producto && productosCache.length === 0) {
+          if (!tiendaData || !tiendaData.id) {
+            throw new Error("Tienda no configurada");
+          }
+          
+          const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+          if (!siteConfig.productos) siteConfig.productos = {};
+          if (!siteConfig.productos[parsed.identifier]) siteConfig.productos[parsed.identifier] = {};
+          
+          siteConfig.productos[parsed.identifier][parsed.field] = value;
+          
+          apiPayload = {
+            action: "update",
+            table: "tiendas",
+            data: { site_config: siteConfig },
+            where: { id: tiendaData.id }
+          };
+          
+          tiendaData.site_config = siteConfig;
+          break;
+        }
+        
+        if (!producto) {
+          throw new Error(`Producto no encontrado: ${parsed.identifier}`);
+        }
+
+        const updateData = {};
+        if (parsed.field.includes(".")) {
+          const topField = parsed.field.split(".")[0];
+          const rest = parsed.field.split(".").slice(1).join(".");
+          const currentFieldValue = JSON.parse(JSON.stringify(producto[topField] || {}));
+          setNestedValue(currentFieldValue, rest, value);
+          updateData[topField] = currentFieldValue;
+        } else {
+          updateData[parsed.field] = value;
+        }
+
+        apiPayload = {
+          action: "update",
+          table: "productos",
+          data: updateData,
+          where: { id: producto.id }
+        };
+
+        Object.assign(producto, updateData);
+        break;
+      }
+
+      case "testimonio": {
+        let testimonio = testimoniosCache.find(t => t.dom_id === parsed.domId);
+        
+        if (!testimonio && el) {
+          const container = el.closest('[data-mineiro-bind*="testimonio-"]')
+                         || el.closest('.testimonial, .testimonio, .review, [class*="testimonial"], [class*="review"]')
+                         || el.parentElement?.parentElement;
+          
+          if (container) {
+            const nombreEl = container.querySelector('[data-mineiro-bind*=".nombre"]')
+                          || container.querySelector('.author-name, .nombre-autor, .reviewer-name');
+            
+            if (nombreEl) {
+              const nombreTexto = nombreEl.textContent?.trim().toLowerCase();
+              if (nombreTexto) {
+                testimonio = testimoniosCache.find(t => 
+                  t.nombre?.toLowerCase().includes(nombreTexto) ||
+                  nombreTexto.includes(t.nombre?.toLowerCase())
+                );
+              }
+            }
+          }
+          
+          if (!testimonio && parsed.domId) {
+            const searchName = parsed.domId.replace(/-/g, ' ').toLowerCase();
+            testimonio = testimoniosCache.find(t => 
+              t.nombre?.toLowerCase().includes(searchName) ||
+              searchName.includes(t.nombre?.toLowerCase())
+            );
+          }
+          
+          if (!testimonio && testimoniosCache.length > 0) {
+            const allTestimonioContainers = document.querySelectorAll('[data-mineiro-bind*="testimonio-"]');
+            const containerIndex = Array.from(allTestimonioContainers).findIndex(c => c.contains(el));
+            if (containerIndex >= 0 && containerIndex < testimoniosCache.length) {
+              testimonio = testimoniosCache[containerIndex];
+            }
+          }
+        }
+        
+        if (!testimonio && testimoniosCache.length === 0) {
+          if (!tiendaData || !tiendaData.id) {
+            throw new Error("Tienda no configurada");
+          }
+          
+          const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+          if (!siteConfig.testimonios) siteConfig.testimonios = {};
+          if (!siteConfig.testimonios[parsed.domId]) siteConfig.testimonios[parsed.domId] = {};
+          
+          siteConfig.testimonios[parsed.domId][parsed.field] = value;
+          
+          apiPayload = {
+            action: "update",
+            table: "tiendas",
+            data: { site_config: siteConfig },
+            where: { id: tiendaData.id }
+          };
+          
+          tiendaData.site_config = siteConfig;
+          break;
+        }
+        
+        if (!testimonio) {
+          throw new Error(`Testimonio no encontrado: ${parsed.domId}`);
+        }
+
+        apiPayload = {
+          action: "update",
+          table: "testimonios",
+          data: { [parsed.field]: value },
+          where: { id: testimonio.id }
+        };
+
+        Object.assign(testimonio, { [parsed.field]: value });
+        break;
+      }
+      
+      // Tipo genérico para cualquier binding no reconocido
+      case "generic":
+      default: {
+        if (!tiendaData || !tiendaData.id) {
+          throw new Error("Tienda no configurada");
+        }
+        
+        const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+        if (!siteConfig.custom) siteConfig.custom = {};
+        
+        // Guardar usando el binding completo como clave
+        const bindingKey = parsed.field || "unknown";
+        siteConfig.custom[bindingKey] = value;
+        
+        apiPayload = {
+          action: "update",
+          table: "tiendas",
+          data: { site_config: siteConfig },
+          where: { id: tiendaData.id }
+        };
+        
+        tiendaData.site_config = siteConfig;
+        break;
+      }
+    }
+
+    if (apiPayload) {
+      const response = await fetch(EDIT_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apiPayload)
+      });
+
+      const result = await response.json();
+      
+      if (!response.ok || result.error) {
+        throw new Error(result.error || `Error HTTP ${response.status}`);
+      }
+      
+      return true;
+    }
+    
+    return false;
+  };
+
+  const saveElementChange = async (el, parsed, isImage, isPrice, selectedStyle = "original", binding = "") => {
     const input = document.getElementById("mineiro-edit-input");
+    const textInput = document.getElementById("mineiro-edit-text");
     const saveBtn = document.getElementById("mineiro-save-btn");
     if (!input) return;
 
@@ -1091,295 +1972,74 @@
       value = parseFloat(value) || 0;
     }
 
-    saveBtn.textContent = "⏳ Guardando...";
+    // Guardar valor original para historial
+    const originalValue = originalValues.get(el);
+    const oldValue = isImage 
+      ? (el.tagName.toLowerCase() === "img" ? el.src : el.style.backgroundImage)
+      : el.textContent?.trim();
+
+    saveBtn.innerHTML = `<div class="mineiro-spinner"></div> Guardando...`;
     saveBtn.disabled = true;
 
     try {
-      let success = false;
-      let apiPayload = null;
-
-      switch (parsed.type) {
-        case "config":
-        case "hero":
-        case "footer":
-        case "testimonios-config": {
-          // Verificar que tiendaData existe
-          if (!tiendaData || !tiendaData.id) {
-            throw new Error("Tienda no configurada. Verifica el slug en data-mineiro-site");
-          }
-          
-          // Update tienda.site_config
-          const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
-          
-          if (parsed.type === "config") {
-            if (!siteConfig.config) siteConfig.config = {};
-            setNestedValue(siteConfig.config, parsed.field, value);
-          } else if (parsed.type === "hero") {
-            if (!siteConfig.hero) siteConfig.hero = {};
-            setNestedValue(siteConfig.hero, parsed.field, value);
-          } else if (parsed.type === "footer") {
-            if (!siteConfig.footer) siteConfig.footer = {};
-            setNestedValue(siteConfig.footer, parsed.field, value);
-          } else if (parsed.type === "testimonios-config") {
-            if (!siteConfig.testimonios_config) siteConfig.testimonios_config = {};
-            setNestedValue(siteConfig.testimonios_config, parsed.field, value);
-          }
-
-          apiPayload = {
-            action: "update",
-            table: "tiendas",
-            data: { site_config: siteConfig },
-            where: { id: tiendaData.id }
-          };
-          
-          // Update local cache
-          tiendaData.site_config = siteConfig;
-          break;
-        }
-
-        case "producto": {
-          log(`Buscando producto con identifier: "${parsed.identifier}"`);
-          log(`Productos en cache: ${productosCache.length}`);
-          
-          // Buscar producto por múltiples métodos
-          let producto = productosCache.find(p => p.dom_id === parsed.identifier)
-                      || productosCache.find(p => String(p.id) === parsed.identifier);
-          
-          // Si no encontró, intentar buscar por el contenedor padre del elemento
-          if (!producto && el) {
-            // Buscar el nombre del producto en el contenedor más cercano
-            const container = el.closest('[data-mineiro-bind*="producto-"]') 
-                           || el.closest('.product-card, .producto, [class*="product"], [class*="producto"]')
-                           || el.parentElement?.parentElement;
-            
-            if (container) {
-              // Buscar un elemento con el nombre del producto
-              const nombreEl = container.querySelector('[data-mineiro-bind*=".nombre"]')
-                            || container.querySelector('h1, h2, h3, h4, .product-name, .nombre-producto');
-              
-              if (nombreEl) {
-                const nombreTexto = nombreEl.textContent?.trim().toLowerCase();
-                if (nombreTexto) {
-                  producto = productosCache.find(p => 
-                    p.nombre?.toLowerCase().includes(nombreTexto) || 
-                    nombreTexto.includes(p.nombre?.toLowerCase())
-                  );
-                }
-              }
-            }
-            
-            // Último intento: si el identifier parece un nombre, buscar por nombre
-            if (!producto && parsed.identifier) {
-              const searchName = parsed.identifier.replace(/-/g, ' ').toLowerCase();
-              producto = productosCache.find(p => 
-                p.nombre?.toLowerCase().includes(searchName) ||
-                searchName.includes(p.nombre?.toLowerCase())
-              );
-            }
-          }
-          
-          // Si no hay productos en cache, guardar en site_config como fallback
-          if (!producto && productosCache.length === 0) {
-            log(`Sin productos en BD, guardando en site_config.productos.${parsed.identifier}`);
-            
-            // Verificar que tiendaData existe
-            if (!tiendaData || !tiendaData.id) {
-              throw new Error("Tienda no configurada. Verifica el slug en data-mineiro-site");
-            }
-            
-            // Guardar en site_config.productos como objeto dinámico
-            const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
-            if (!siteConfig.productos) siteConfig.productos = {};
-            if (!siteConfig.productos[parsed.identifier]) siteConfig.productos[parsed.identifier] = {};
-            
-            siteConfig.productos[parsed.identifier][parsed.field] = value;
-            
-            apiPayload = {
-              action: "update",
-              table: "tiendas",
-              data: { site_config: siteConfig },
-              where: { id: tiendaData.id }
-            };
-            
-            // Update local cache
-            tiendaData.site_config = siteConfig;
-            break;
-          }
-          
-          if (!producto) {
-            warn("Productos disponibles:", productosCache.map(p => ({ id: p.id, nombre: p.nombre, dom_id: p.dom_id })));
-            throw new Error(`Producto no encontrado: ${parsed.identifier}. Verifica que exista en la base de datos o que el dom_id coincida.`);
-          }
-
-          log(`Producto encontrado: ${producto.nombre} (id: ${producto.id})`);
-
-          // Build update object
-          const updateData = {};
-          if (parsed.field.includes(".")) {
-            const topField = parsed.field.split(".")[0];
-            const rest = parsed.field.split(".").slice(1).join(".");
-            const currentFieldValue = JSON.parse(JSON.stringify(producto[topField] || {}));
-            setNestedValue(currentFieldValue, rest, value);
-            updateData[topField] = currentFieldValue;
-          } else {
-            updateData[parsed.field] = value;
-          }
-
-          apiPayload = {
-            action: "update",
-            table: "productos",
-            data: updateData,
-            where: { id: producto.id }
-          };
-
-          // Update local cache
-          Object.assign(producto, updateData);
-          break;
-        }
-
-        case "testimonio": {
-          // Buscar testimonio por múltiples métodos
-          let testimonio = testimoniosCache.find(t => t.dom_id === parsed.domId);
-          
-          // Si no encontró, intentar buscar por el contenedor padre
-          if (!testimonio && el) {
-            const container = el.closest('[data-mineiro-bind*="testimonio-"]')
-                           || el.closest('.testimonial, .testimonio, .review, [class*="testimonial"]')
-                           || el.parentElement?.parentElement;
-            
-            if (container) {
-              // Buscar por nombre del autor
-              const nombreEl = container.querySelector('[data-mineiro-bind*=".nombre"]')
-                            || container.querySelector('.author-name, .nombre-autor, .reviewer-name');
-              
-              if (nombreEl) {
-                const nombreTexto = nombreEl.textContent?.trim().toLowerCase();
-                if (nombreTexto) {
-                  testimonio = testimoniosCache.find(t => 
-                    t.nombre?.toLowerCase().includes(nombreTexto) ||
-                    nombreTexto.includes(t.nombre?.toLowerCase())
-                  );
-                }
-              }
-            }
-            
-            // Intentar buscar por nombre en el identifier
-            if (!testimonio && parsed.domId) {
-              const searchName = parsed.domId.replace(/-/g, ' ').toLowerCase();
-              testimonio = testimoniosCache.find(t => 
-                t.nombre?.toLowerCase().includes(searchName) ||
-                searchName.includes(t.nombre?.toLowerCase())
-              );
-            }
-            
-            // Último intento: usar el índice basado en la posición en el DOM
-            if (!testimonio && testimoniosCache.length > 0) {
-              const allTestimonioContainers = document.querySelectorAll('[data-mineiro-bind*="testimonio-"]');
-              const containerIndex = Array.from(allTestimonioContainers).findIndex(c => c.contains(el));
-              if (containerIndex >= 0 && containerIndex < testimoniosCache.length) {
-                testimonio = testimoniosCache[containerIndex];
-              }
-            }
-          }
-          
-          // Si no hay testimonios en cache, guardar en site_config como fallback
-          if (!testimonio && testimoniosCache.length === 0) {
-            log(`Sin testimonios en BD, guardando en site_config.testimonios.${parsed.domId}`);
-            
-            if (!tiendaData || !tiendaData.id) {
-              throw new Error("Tienda no configurada. Verifica el slug en data-mineiro-site");
-            }
-            
-            const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
-            if (!siteConfig.testimonios) siteConfig.testimonios = {};
-            if (!siteConfig.testimonios[parsed.domId]) siteConfig.testimonios[parsed.domId] = {};
-            
-            siteConfig.testimonios[parsed.domId][parsed.field] = value;
-            
-            apiPayload = {
-              action: "update",
-              table: "tiendas",
-              data: { site_config: siteConfig },
-              where: { id: tiendaData.id }
-            };
-            
-            tiendaData.site_config = siteConfig;
-            break;
-          }
-          
-          if (!testimonio) {
-            warn("Testimonios disponibles:", testimoniosCache.map(t => ({ id: t.id, nombre: t.nombre, dom_id: t.dom_id })));
-            throw new Error(`Testimonio no encontrado: ${parsed.domId}. Verifica que exista en la base de datos.`);
-          }
-
-          log(`Testimonio encontrado: ${testimonio.nombre} (id: ${testimonio.id})`);
-
-          apiPayload = {
-            action: "update",
-            table: "testimonios",
-            data: { [parsed.field]: value },
-            where: { id: testimonio.id }
-          };
-
-          // Update local cache
-          Object.assign(testimonio, { [parsed.field]: value });
-          break;
-        }
-      }
-
       // Llamar a la API
-      if (apiPayload) {
-        log("Enviando a API:", JSON.stringify(apiPayload, null, 2));
-        
-        const response = await fetch(EDIT_API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(apiPayload)
-        });
+      await saveToAPI(parsed, value, el);
 
-        const result = await response.json();
-        log("Respuesta API:", result);
-        
-        if (!response.ok || result.error) {
-          throw new Error(result.error || `Error HTTP ${response.status}`);
-        }
-        
-        success = true;
+      // Aplicar valor al elemento inmediatamente (preservando estilos)
+      applyValueToElement(el, value, parsed.field);
+      
+      // Aplicar texto visible si es un enlace
+      if (textInput && el.tagName.toLowerCase() === "a") {
+        el.textContent = textInput.value;
+      }
+      
+      // Aplicar estilo seleccionado
+      if (selectedStyle !== "original") {
+        const styleData = { style: selectedStyle };
+        // Guardar estilo aplicado
+        el.dataset.mineiroStyle = selectedStyle;
       }
 
-      if (success) {
-        // Apply value to element immediately
-        applyValueToElement(el, value, parsed.field);
+      // Agregar al historial para poder deshacer
+      addToHistory(el, binding || el.dataset.mineiroBind, oldValue, value, parsed.field);
 
-        // Close popup with success feedback
-        const popup = document.querySelector(".mineiro-edit-popup");
-        if (popup) {
-          popup.innerHTML = `
-            <div style="text-align:center;padding:30px">
-              <div style="font-size:48px;margin-bottom:10px">✅</div>
-              <div style="color:#4ade80;font-size:16px;font-weight:600">¡Guardado!</div>
-              <div style="color:#94a3b8;font-size:13px;margin-top:5px">El cambio se refleja en tu página</div>
-            </div>
-          `;
-          setTimeout(() => popup.remove(), 1200);
-        }
-
-        if (selectedElement) {
-          selectedElement.classList.remove("mineiro-selected");
-          selectedElement = null;
-        }
-
-        log(`✓ Guardado: ${parsed.type}.${parsed.field} = ${value}`);
+      // Cerrar popup con feedback de éxito
+      const popup = document.querySelector(".mineiro-edit-popup");
+      if (popup) {
+        popup.innerHTML = `
+          <div style="text-align:center;padding:30px">
+            <div style="font-size:48px;margin-bottom:10px">✅</div>
+            <div style="color:#4ade80;font-size:16px;font-weight:600">¡Guardado!</div>
+            <div style="color:#94a3b8;font-size:13px;margin-top:5px">Ctrl+Z para deshacer</div>
+          </div>
+        `;
+        setTimeout(() => popup.remove(), 1000);
       }
+
+      if (selectedElement) {
+        selectedElement.classList.remove("mineiro-selected");
+        selectedElement = null;
+      }
+
+      log(`✓ Guardado: ${binding || parsed.type}.${parsed.field} = ${value}`);
 
     } catch (error) {
       warn("Error al guardar:", error.message);
       
-      saveBtn.textContent = "❌ Error";
+      saveBtn.innerHTML = "❌ Error";
       saveBtn.style.background = "#ef4444";
       
+      // Mostrar error en popup
+      const popup = document.querySelector(".mineiro-edit-popup");
+      if (popup) {
+        const errorDiv = document.createElement("div");
+        errorDiv.style.cssText = "color:#ef4444;font-size:12px;margin-top:8px;padding:8px;background:#1e1e1e;border-radius:6px;";
+        errorDiv.textContent = `Error: ${error.message}`;
+        popup.appendChild(errorDiv);
+      }
+      
       setTimeout(() => {
-        saveBtn.textContent = "💾 Guardar";
+        saveBtn.innerHTML = "💾 Guardar";
         saveBtn.style.background = "";
         saveBtn.disabled = false;
       }, 2000);
@@ -1439,6 +2099,14 @@
   window.MineiroAdmin = {
     enable: enableAdminMode,
     disable: disableAdminMode,
+    toggleBar: toggleAdminBar,
+    undo: undoLastChange,
+    getHistory: () => [...changeHistory],
+    clearHistory: () => {
+      changeHistory.length = 0;
+      updateUndoButton();
+      log("Historial limpiado");
+    },
     openDashboard: () => {
       const siteId = getSiteId();
       window.open(`https://mineiro-clientes.vercel.app/dashboard`, "_blank");
@@ -1475,9 +2143,12 @@
     getData: () => ({
       tienda: tiendaData,
       productos: productosCache,
-      testimonios: testimoniosCache
+      testimonios: testimoniosCache,
+      history: changeHistory.length,
     }),
     getSiteId,
+    isAdminMode: () => adminMode,
+    isBarVisible: () => adminBarVisible,
     version: VERSION,
   };
 
