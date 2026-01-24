@@ -99,20 +99,31 @@
     return supabase;
   };
 
-  const fetchTienda = async (slug) => {
+  const TIENDA_API_URL = "https://mineiro-clientes.vercel.app/api/tienda";
+
+  // Función unificada que carga tienda + productos + testimonios via API (bypass RLS)
+  const fetchAllData = async (slug) => {
     const hostname = window.location.hostname;
     
-    const { data, error } = await supabase
-      .from("tiendas")
-      .select("*")
-      .or(`slug.eq.${slug},url_web.ilike.%${hostname}%`)
-      .limit(1)
-      .maybeSingle();
-    
-    if (error && error.code !== 'PGRST116') {
-      warn("Error fetching tienda:", error.message);
+    try {
+      const response = await fetch(
+        `${TIENDA_API_URL}?slug=${encodeURIComponent(slug)}&hostname=${encodeURIComponent(hostname)}&include=all`
+      );
+      const result = await response.json();
+      
+      if (result.found && result.tienda) {
+        return {
+          tienda: result.tienda,
+          productos: result.productos || [],
+          testimonios: result.testimonios || []
+        };
+      }
+      
+      return { tienda: null, productos: [], testimonios: [] };
+    } catch (apiError) {
+      warn("Error con API:", apiError.message);
+      return { tienda: null, productos: [], testimonios: [] };
     }
-    return data;
   };
 
   const fetchSecciones = async (tiendaId) => {
@@ -122,28 +133,6 @@
       .eq("tienda_id", tiendaId)
       .order("orden", { ascending: true });
     if (error) throw error;
-    return data ?? [];
-  };
-
-  const fetchProductos = async (tiendaId) => {
-    const { data, error } = await supabase
-      .from("productos")
-      .select("*")
-      .eq("tienda_id", tiendaId)
-      .eq("visible", true)
-      .order("nombre", { ascending: true });
-    if (error) throw error;
-    return data ?? [];
-  };
-
-  const fetchTestimonios = async (tiendaId) => {
-    const { data, error } = await supabase
-      .from("testimonios")
-      .select("*")
-      .eq("tienda_id", tiendaId)
-      .eq("visible", true)
-      .order("orden", { ascending: true });
-    if (error && error.code !== "PGRST116") throw error;
     return data ?? [];
   };
 
@@ -677,14 +666,19 @@
       await initSupabase(config);
       log("Supabase conectado");
 
-      // Fetch tienda
-      tiendaData = await fetchTienda(config.storeSlug);
+      // Fetch tienda + productos + testimonios via API (bypass RLS)
+      const allData = await fetchAllData(config.storeSlug);
+      tiendaData = allData.tienda;
+      productosCache = allData.productos;
+      testimoniosCache = allData.testimonios;
+      
       if (!tiendaData) {
         warn(`Tienda no encontrada para: ${config.storeSlug}`);
         return;
       }
 
       log("Tienda cargada:", tiendaData.nombre_negocio);
+      log(`Cargados: ${productosCache.length} productos, ${testimoniosCache.length} testimonios`);
 
       // Check payment status - allow trial period
       if (tiendaData.estado_pago === false && tiendaData.plan !== "trial") {
@@ -692,23 +686,19 @@
         return;
       }
 
-      // Fetch data in parallel
-      const [productos, secciones, testimonios] = await Promise.all([
-        fetchProductos(tiendaData.id),
-        fetchSecciones(tiendaData.id).catch(() => []),
-        fetchTestimonios(tiendaData.id).catch(() => []),
-      ]);
-
-      productosCache = productos;
+      // Fetch secciones (puede fallar por RLS)
+      let secciones = [];
+      try {
+        secciones = await fetchSecciones(tiendaData.id);
+      } catch (e) {
+        // No es crítico
+      }
       seccionesCache = secciones;
-      testimoniosCache = testimonios;
-
-      log(`Cargados: ${productos.length} productos, ${secciones.length} secciones, ${testimonios.length} testimonios`);
 
       // Run all binding modes
-      runHydrationMode(tiendaData, productos, testimonios);
-      runInjectionMode(productos);
-      runDomIdBinding(productos, secciones, testimonios);
+      runHydrationMode(tiendaData, productosCache, testimoniosCache);
+      runInjectionMode(productosCache);
+      runDomIdBinding(productosCache, secciones, testimoniosCache);
 
       // Attach variant listeners after all rendering
       attachVariantListeners();
@@ -717,12 +707,16 @@
       setupMutationObserver();
 
       // Reintentar hidratación para SPAs (React, Vue, etc)
-      setTimeout(() => runHydrationMode(tiendaData, productos, testimonios), 500);
-      setTimeout(() => runHydrationMode(tiendaData, productos, testimonios), 1500);
-      setTimeout(() => runHydrationMode(tiendaData, productos, testimonios), 3000);
+      setTimeout(() => runHydrationMode(tiendaData, productosCache, testimoniosCache), 500);
+      setTimeout(() => runHydrationMode(tiendaData, productosCache, testimoniosCache), 1500);
+      setTimeout(() => runHydrationMode(tiendaData, productosCache, testimoniosCache), 3000);
 
-      // Subscribe to realtime changes
-      subscribeToChanges(tiendaData.id);
+      // Subscribe to realtime changes (puede fallar por RLS)
+      try {
+        subscribeToChanges(tiendaData.id);
+      } catch (e) {
+        warn("Realtime no disponible, los cambios se verán al recargar");
+      }
 
       log("✓ Engine listo");
     } catch (err) {

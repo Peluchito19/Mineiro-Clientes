@@ -16,14 +16,15 @@ export async function OPTIONS() {
   return NextResponse.json({}, { headers: corsHeaders });
 }
 
-// GET - Buscar tienda por slug o hostname
+// GET - Buscar tienda por slug o hostname (incluye productos y testimonios)
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     let slug = searchParams.get("slug");
     const hostname = searchParams.get("hostname");
+    const includeData = searchParams.get("include") === "all"; // Si include=all, cargar productos y testimonios
 
-    console.log("Buscando tienda:", { slug, hostname });
+    console.log("Buscando tienda:", { slug, hostname, includeData });
 
     if (!slug && !hostname) {
       return NextResponse.json({ error: "Se requiere slug o hostname" }, { status: 400, headers: corsHeaders });
@@ -65,7 +66,6 @@ export async function GET(request) {
         .select("*");
       
       if (allTiendas) {
-        // Buscar coincidencia exacta del slug en nombre normalizado
         tienda = allTiendas.find(t => {
           const nombreNorm = t.nombre_negocio?.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
           const slugNorm = slug.toLowerCase();
@@ -85,9 +85,37 @@ export async function GET(request) {
       }, { headers: corsHeaders });
     }
 
+    // Si se solicita, cargar también productos y testimonios
+    let productos = [];
+    let testimonios = [];
+    
+    if (includeData) {
+      const [productosResult, testimoniosResult] = await Promise.all([
+        supabaseAdmin
+          .from("productos")
+          .select("*")
+          .eq("tienda_id", tienda.id)
+          .eq("visible", true)
+          .order("nombre", { ascending: true }),
+        supabaseAdmin
+          .from("testimonios")
+          .select("*")
+          .eq("tienda_id", tienda.id)
+          .eq("visible", true)
+          .order("orden", { ascending: true })
+      ]);
+      
+      productos = productosResult.data || [];
+      testimonios = testimoniosResult.data || [];
+      
+      console.log(`Cargados: ${productos.length} productos, ${testimonios.length} testimonios`);
+    }
+
     return NextResponse.json({ 
       found: true, 
-      tienda 
+      tienda,
+      productos,
+      testimonios
     }, { headers: corsHeaders });
 
   } catch (error) {

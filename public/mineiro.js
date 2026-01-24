@@ -130,16 +130,23 @@
 
   const TIENDA_API_URL = "https://mineiro-clientes.vercel.app/api/tienda";
 
-  const fetchTienda = async (slug) => {
+  // Función unificada que carga tienda + productos + testimonios via API (bypass RLS)
+  const fetchAllData = async (slug) => {
     const hostname = window.location.hostname;
     
     try {
-      // Primero intentar con la API (más confiable)
-      const response = await fetch(`${TIENDA_API_URL}?slug=${encodeURIComponent(slug)}&hostname=${encodeURIComponent(hostname)}`);
+      // Usar la API con include=all para cargar todo
+      const response = await fetch(
+        `${TIENDA_API_URL}?slug=${encodeURIComponent(slug)}&hostname=${encodeURIComponent(hostname)}&include=all`
+      );
       const result = await response.json();
       
       if (result.found && result.tienda) {
-        return result.tienda;
+        return {
+          tienda: result.tienda,
+          productos: result.productos || [],
+          testimonios: result.testimonios || []
+        };
       }
       
       // Si no se encontró, crear la tienda automáticamente
@@ -157,48 +164,18 @@
       const createResult = await createResponse.json();
       if (createResult.success && createResult.tienda) {
         log("Tienda creada exitosamente:", createResult.tienda.nombre_negocio);
-        return createResult.tienda;
+        return {
+          tienda: createResult.tienda,
+          productos: [],
+          testimonios: []
+        };
       }
       
-      return null;
+      return { tienda: null, productos: [], testimonios: [] };
     } catch (apiError) {
-      warn("Error con API, intentando directo con Supabase:", apiError.message);
-      
-      // Fallback a Supabase directo
-      const { data, error } = await supabase
-        .from("tiendas")
-        .select("*")
-        .or(`slug.eq.${slug},url_web.ilike.%${hostname}%`)
-        .limit(1)
-        .maybeSingle();
-      
-      if (error && error.code !== 'PGRST116') {
-        warn("Error fetching tienda:", error.message);
-      }
-      return data;
+      warn("Error con API:", apiError.message);
+      return { tienda: null, productos: [], testimonios: [] };
     }
-  };
-
-  const fetchProductos = async (tiendaId) => {
-    const { data, error } = await supabase
-      .from("productos")
-      .select("*")
-      .eq("tienda_id", tiendaId)
-      .eq("visible", true)
-      .order("nombre", { ascending: true });
-    if (error) throw error;
-    return data ?? [];
-  };
-
-  const fetchTestimonios = async (tiendaId) => {
-    const { data, error } = await supabase
-      .from("testimonios")
-      .select("*")
-      .eq("tienda_id", tiendaId)
-      .eq("visible", true)
-      .order("orden", { ascending: true });
-    if (error && error.code !== "PGRST116") throw error;
-    return data ?? [];
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -1310,44 +1287,42 @@
       const siteId = getSiteId();
       log(`Site ID: ${siteId}`);
 
-      // Fetch tienda
-      tiendaData = await fetchTienda(siteId);
+      // Fetch tienda + productos + testimonios via API (bypass RLS)
+      const allData = await fetchAllData(siteId);
+      tiendaData = allData.tienda;
+      productosCache = allData.productos;
+      testimoniosCache = allData.testimonios;
       
       if (tiendaData) {
         log("Tienda cargada:", tiendaData.nombre_negocio, "(id:", tiendaData.id + ")");
         log("Slug en BD:", tiendaData.slug);
         log("URL web:", tiendaData.url_web);
 
-        // Fetch data in parallel
-        const [productos, testimonios] = await Promise.all([
-          fetchProductos(tiendaData.id).catch(() => []),
-          fetchTestimonios(tiendaData.id).catch(() => []),
-        ]);
-
-        productosCache = productos;
-        testimoniosCache = testimonios;
-
-        log(`Cargados: ${productos.length} productos, ${testimonios.length} testimonios`);
-        if (productos.length > 0) {
-          log("Productos:", productos.map(p => `${p.nombre} (id:${p.id}, dom_id:${p.dom_id || 'none'})`).join(", "));
+        log(`Cargados: ${productosCache.length} productos, ${testimoniosCache.length} testimonios`);
+        if (productosCache.length > 0) {
+          log("Productos:", productosCache.map(p => `${p.nombre} (id:${p.id}, dom_id:${p.dom_id || 'none'})`).join(", "));
         }
-        if (testimonios.length > 0) {
-          log("Testimonios:", testimonios.map(t => `${t.nombre} (id:${t.id}, dom_id:${t.dom_id || 'none'})`).join(", "));
+        if (testimoniosCache.length > 0) {
+          log("Testimonios:", testimoniosCache.map(t => `${t.nombre} (id:${t.id}, dom_id:${t.dom_id || 'none'})`).join(", "));
         }
 
         // Hydrate elements (intento inicial)
-        runHydration(tiendaData, productos, testimonios);
+        runHydration(tiendaData, productosCache, testimoniosCache);
 
         // Configurar MutationObserver para detectar elementos de React
         setupMutationObserver();
 
         // Reintentar hidratación después de que React termine (por si acaso)
-        setTimeout(() => runHydration(tiendaData, productos, testimonios), 500);
-        setTimeout(() => runHydration(tiendaData, productos, testimonios), 1500);
-        setTimeout(() => runHydration(tiendaData, productos, testimonios), 3000);
+        setTimeout(() => runHydration(tiendaData, productosCache, testimoniosCache), 500);
+        setTimeout(() => runHydration(tiendaData, productosCache, testimoniosCache), 1500);
+        setTimeout(() => runHydration(tiendaData, productosCache, testimoniosCache), 3000);
 
-        // Subscribe to realtime changes
-        subscribeToChanges(tiendaData.id);
+        // Subscribe to realtime changes (puede fallar por RLS pero no es crítico)
+        try {
+          subscribeToChanges(tiendaData.id);
+        } catch (e) {
+          warn("Realtime no disponible, los cambios se verán al recargar");
+        }
       } else {
         warn(`Tienda no encontrada para: ${siteId}`);
         log("El modo admin funcionará pero sin datos de la tienda");
