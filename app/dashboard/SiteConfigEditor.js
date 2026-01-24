@@ -344,6 +344,15 @@ export default function SiteConfigEditor({ tienda, userId, onSave }) {
         {/* Footer */}
         <ConfigSection title="Pie de Página (Footer)" icon={FileText} color="emerald">
           <ConfigField
+            label="Nombre a mostrar en Footer"
+            icon={Type}
+            field="nombre_tienda"
+            value={config.footer?.nombre_tienda || tienda.nombre_negocio}
+            onChange={(f, v) => updateField("footer", f, v)}
+            placeholder="Mi Tienda"
+            hint="Si está vacío, se usará el nombre del negocio"
+          />
+          <ConfigField
             label="Descripción del Negocio"
             field="descripcion"
             value={config.footer?.descripcion}
@@ -369,24 +378,16 @@ export default function SiteConfigEditor({ tienda, userId, onSave }) {
               placeholder="contacto@mitienda.cl"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <ConfigField
-              label="Horario Semana"
-              icon={Clock}
-              field="horario_semana"
-              value={config.footer?.horario_semana}
-              onChange={(f, v) => updateField("footer", f, v)}
-              placeholder="Lun - Vie: 9:00 - 18:00"
-            />
-            <ConfigField
-              label="Horario Sábado"
-              icon={Clock}
-              field="horario_sabado"
-              value={config.footer?.horario_sabado}
-              onChange={(f, v) => updateField("footer", f, v)}
-              placeholder="Sáb: 10:00 - 14:00"
-            />
-          </div>
+          <ConfigField
+            label="Horario de Atención"
+            icon={Clock}
+            field="horario"
+            value={config.footer?.horario}
+            onChange={(f, v) => updateField("footer", f, v)}
+            placeholder="Lunes a Viernes: 9:00 AM - 6:00 PM&#10;Sábados: 10:00 AM - 2:00 PM"
+            type="textarea"
+            hint="Puedes incluir múltiples líneas de horario"
+          />
           <ConfigField
             label="Texto de Copyright"
             field="copyright"

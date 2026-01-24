@@ -29,6 +29,11 @@ import {
   Palette,
   Layout,
   Globe,
+  Edit3,
+  Package,
+  MessageSquare,
+  Home,
+  AlertCircle,
 } from "lucide-react";
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -58,191 +63,254 @@ const formatPrice = (value) => {
 };
 
 /* ─────────────────────────────────────────────────────────────────────────
-   ELEMENT EDITOR CARD
+   PRODUCT CARD EDITOR
    ───────────────────────────────────────────────────────────────────────── */
 
-function ElementCard({ element, onUpdate, isSaving }) {
-  const [value, setValue] = useState(element.current_value || "");
-  const [isDirty, setIsDirty] = useState(false);
-  const config = ElementTypeConfig[element.type] || ElementTypeConfig.paragraph;
-  const Icon = config.icon;
+function ProductCard({ producto, onUpdate, isSaving }) {
+  const [editingField, setEditingField] = useState(null);
+  const [tempValue, setTempValue] = useState("");
 
-  useEffect(() => {
-    setValue(element.current_value || "");
-    setIsDirty(false);
-  }, [element.current_value]);
-
-  const handleChange = (newValue) => {
-    setValue(newValue);
-    setIsDirty(newValue !== element.current_value);
+  const startEdit = (field, value) => {
+    setEditingField(field);
+    setTempValue(value || "");
   };
 
-  const handleSave = () => {
-    if (!isDirty) return;
-    onUpdate(element.element_id, value);
-    setIsDirty(false);
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey && element.type !== "paragraph") {
-      e.preventDefault();
-      handleSave();
+  const saveField = async () => {
+    if (editingField) {
+      await onUpdate(producto.id, editingField, tempValue);
+      setEditingField(null);
     }
   };
 
-  const colorClasses = {
-    emerald: "border-emerald-500/30 bg-emerald-500/5",
-    cyan: "border-cyan-500/30 bg-cyan-500/5",
-    blue: "border-blue-500/30 bg-blue-500/5",
-    slate: "border-slate-600/30 bg-slate-500/5",
-    violet: "border-violet-500/30 bg-violet-500/5",
-    amber: "border-amber-500/30 bg-amber-500/5",
-    rose: "border-rose-500/30 bg-rose-500/5",
-    pink: "border-pink-500/30 bg-pink-500/5",
-    indigo: "border-indigo-500/30 bg-indigo-500/5",
-  };
-
-  const iconColors = {
-    emerald: "text-emerald-400",
-    cyan: "text-cyan-400",
-    blue: "text-blue-400",
-    slate: "text-slate-400",
-    violet: "text-violet-400",
-    amber: "text-amber-400",
-    rose: "text-rose-400",
-    pink: "text-pink-400",
-    indigo: "text-indigo-400",
+  const cancelEdit = () => {
+    setEditingField(null);
+    setTempValue("");
   };
 
   return (
-    <div className={`rounded-xl border p-4 transition-all ${colorClasses[config.color]} ${isDirty ? "ring-2 ring-amber-500/50" : ""}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Icon size={16} className={iconColors[config.color]} />
-          <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-            {config.label}
-          </span>
-          {isDirty && (
-            <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">
-              Sin guardar
-            </span>
+    <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 overflow-hidden hover:border-slate-600 transition-all">
+      {/* Image Section */}
+      <div className="relative h-40 bg-slate-900/50">
+        {producto.imagen_url ? (
+          <img
+            src={producto.imagen_url}
+            alt={producto.nombre}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-500">
+            <Image size={32} />
+          </div>
+        )}
+        <button
+          onClick={() => startEdit("imagen_url", producto.imagen_url)}
+          className="absolute top-2 right-2 p-2 rounded-lg bg-slate-900/80 text-white hover:bg-slate-800 transition-colors"
+          title="Editar imagen"
+        >
+          <Edit3 size={14} />
+        </button>
+      </div>
+
+      {/* Content Section */}
+      <div className="p-4 space-y-3">
+        {/* Name */}
+        <div className="group">
+          {editingField === "nombre" ? (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={tempValue}
+                onChange={(e) => setTempValue(e.target.value)}
+                className="flex-1 px-3 py-2 rounded-lg bg-slate-900 border border-cyan-500 text-white text-sm focus:outline-none"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveField();
+                  if (e.key === "Escape") cancelEdit();
+                }}
+              />
+              <button onClick={saveField} disabled={isSaving} className="p-2 rounded-lg bg-cyan-500 text-white">
+                {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              </button>
+              <button onClick={cancelEdit} className="p-2 rounded-lg bg-slate-700 text-white">
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <div
+              className="flex items-center justify-between cursor-pointer hover:bg-slate-700/30 rounded-lg px-2 py-1 -mx-2"
+              onClick={() => startEdit("nombre", producto.nombre)}
+            >
+              <h3 className="font-medium text-slate-100">{producto.nombre || "Sin nombre"}</h3>
+              <Edit3 size={14} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
           )}
         </div>
-        {isDirty && (
-          <button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 text-white text-xs font-medium hover:bg-cyan-400 transition-colors disabled:opacity-50"
-          >
-            {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-            Guardar
-          </button>
-        )}
+
+        {/* Price */}
+        <div className="group">
+          {editingField === "precio" ? (
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                <input
+                  type="number"
+                  value={tempValue}
+                  onChange={(e) => setTempValue(e.target.value)}
+                  className="w-full pl-7 pr-3 py-2 rounded-lg bg-slate-900 border border-emerald-500 text-white text-sm focus:outline-none"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveField();
+                    if (e.key === "Escape") cancelEdit();
+                  }}
+                />
+              </div>
+              <button onClick={saveField} disabled={isSaving} className="p-2 rounded-lg bg-emerald-500 text-white">
+                {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              </button>
+              <button onClick={cancelEdit} className="p-2 rounded-lg bg-slate-700 text-white">
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <div
+              className="flex items-center justify-between cursor-pointer hover:bg-slate-700/30 rounded-lg px-2 py-1 -mx-2"
+              onClick={() => startEdit("precio", producto.precio)}
+            >
+              <span className="text-lg font-bold text-emerald-400">{formatPrice(producto.precio)}</span>
+              <Edit3 size={14} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          )}
+        </div>
+
+        {/* DOM ID */}
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <Tag size={12} />
+          <code className="bg-slate-900/50 px-2 py-0.5 rounded">{producto.dom_id || producto.id}</code>
+        </div>
       </div>
 
-      {/* Name */}
-      <p className="text-sm text-slate-200 font-medium mb-2 truncate" title={element.name}>
-        {element.name}
-      </p>
-
-      {/* Input */}
-      {element.type === "image" ? (
-        <div className="space-y-2">
-          <div className="relative h-24 rounded-lg overflow-hidden bg-slate-800/50 border border-slate-700">
-            {value ? (
-              <img src={value} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <div className="flex items-center justify-center h-full text-slate-500 text-xs">
-                Sin imagen
-              </div>
-            )}
-          </div>
+      {/* Image URL Edit Modal */}
+      {editingField === "imagen_url" && (
+        <div className="p-4 border-t border-slate-700 bg-slate-900/50">
+          <label className="text-xs text-slate-400 mb-2 block">URL de la imagen</label>
           <input
             type="url"
-            value={value}
-            onChange={(e) => handleChange(e.target.value)}
-            onKeyDown={handleKeyDown}
+            value={tempValue}
+            onChange={(e) => setTempValue(e.target.value)}
             placeholder="https://..."
-            className="w-full px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-100 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-violet-500 text-white text-sm focus:outline-none mb-3"
+            autoFocus
           />
-        </div>
-      ) : element.type === "paragraph" ? (
-        <textarea
-          value={value}
-          onChange={(e) => handleChange(e.target.value)}
-          rows={3}
-          className="w-full px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-100 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 resize-none"
-        />
-      ) : element.type === "price" ? (
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-            <input
-              type="number"
-              value={typeof value === "number" ? value : parseFloat(value) || ""}
-              onChange={(e) => handleChange(parseFloat(e.target.value) || 0)}
-              onKeyDown={handleKeyDown}
-              className="w-full pl-7 pr-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
-            />
-          </div>
-          <div className="px-3 py-2 rounded-lg bg-slate-700/50 text-emerald-400 text-sm font-medium">
-            {formatPrice(value)}
+          <div className="flex gap-2">
+            <button onClick={saveField} disabled={isSaving} className="flex-1 py-2 rounded-lg bg-violet-500 text-white text-sm font-medium">
+              {isSaving ? "Guardando..." : "Guardar imagen"}
+            </button>
+            <button onClick={cancelEdit} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">
+              Cancelar
+            </button>
           </div>
         </div>
-      ) : (
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => handleChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className="w-full px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-100 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
-        />
       )}
-
-      {/* Context badge */}
-      <div className="mt-2 flex items-center gap-2">
-        <span className="text-xs text-slate-500">
-          Sección: <code className="bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">{element.context}</code>
-        </span>
-      </div>
     </div>
   );
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   CONTEXT GROUP
+   SITE CONFIG FIELD EDITOR
    ───────────────────────────────────────────────────────────────────────── */
 
-function ContextGroup({ context, elements, onUpdate, isSaving }) {
-  const [isExpanded, setIsExpanded] = useState(true);
+function ConfigField({ label, value, onChange, onSave, isSaving, type = "text", icon: Icon }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [tempValue, setTempValue] = useState(value || "");
+
+  useEffect(() => {
+    setTempValue(value || "");
+  }, [value]);
+
+  const handleSave = async () => {
+    await onSave(tempValue);
+    setIsEditing(false);
+  };
+
+  const isImage = type === "image";
+  const isTextarea = type === "textarea";
 
   return (
-    <div className="rounded-xl border border-slate-800/60 bg-slate-900/40 overflow-hidden">
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/30 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          <Layout size={16} className="text-violet-400" />
-          <span className="font-medium text-slate-200">{context}</span>
-          <span className="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full">
-            {elements.length} elementos
-          </span>
-        </div>
-      </button>
+    <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-4 hover:border-slate-600 transition-all">
+      <div className="flex items-center gap-2 mb-3">
+        {Icon && <Icon size={16} className="text-slate-400" />}
+        <span className="text-sm font-medium text-slate-300">{label}</span>
+      </div>
 
-      {isExpanded && (
-        <div className="p-4 pt-0 space-y-3">
-          {elements.map((el) => (
-            <ElementCard
-              key={el.element_id}
-              element={el}
-              onUpdate={onUpdate}
-              isSaving={isSaving}
+      {isEditing ? (
+        <div className="space-y-3">
+          {isImage && tempValue && (
+            <div className="h-24 rounded-lg overflow-hidden bg-slate-900 border border-slate-700">
+              <img src={tempValue} alt="" className="w-full h-full object-cover" />
+            </div>
+          )}
+          {isTextarea ? (
+            <textarea
+              value={tempValue}
+              onChange={(e) => setTempValue(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-cyan-500 text-white text-sm focus:outline-none resize-none"
+              autoFocus
             />
-          ))}
+          ) : (
+            <input
+              type={type === "price" ? "number" : "text"}
+              value={tempValue}
+              onChange={(e) => setTempValue(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-cyan-500 text-white text-sm focus:outline-none"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !isTextarea) handleSave();
+                if (e.key === "Escape") setIsEditing(false);
+              }}
+            />
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="flex-1 py-2 rounded-lg bg-cyan-500 text-white text-sm font-medium flex items-center justify-center gap-2"
+            >
+              {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              Guardar
+            </button>
+            <button
+              onClick={() => {
+                setIsEditing(false);
+                setTempValue(value || "");
+              }}
+              className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="flex items-center justify-between cursor-pointer hover:bg-slate-700/30 rounded-lg px-3 py-2 -mx-1 group"
+          onClick={() => setIsEditing(true)}
+        >
+          {isImage ? (
+            value ? (
+              <div className="h-16 w-24 rounded-lg overflow-hidden bg-slate-900">
+                <img src={value} alt="" className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <span className="text-slate-500 text-sm italic">Sin imagen</span>
+            )
+          ) : type === "price" ? (
+            <span className="text-emerald-400 font-bold">{formatPrice(value)}</span>
+          ) : (
+            <span className={`text-slate-200 text-sm ${!value ? "italic text-slate-500" : ""}`}>
+              {value || "Sin definir"}
+            </span>
+          )}
+          <Edit3 size={14} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
       )}
     </div>
@@ -256,104 +324,155 @@ function ContextGroup({ context, elements, onUpdate, isSaving }) {
 export default function EditorClient({ siteId, site, initialElements, userId }) {
   const supabase = getSupabaseClient();
   const iframeRef = useRef(null);
-  
-  const [elements, setElements] = useState(initialElements);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filterType, setFilterType] = useState("all");
+
+  // State
+  const [activeTab, setActiveTab] = useState("productos");
+  const [productos, setProductos] = useState([]);
+  const [tienda, setTienda] = useState(null);
+  const [testimonios, setTestimonios] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
   const [previewSize, setPreviewSize] = useState("desktop");
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Group elements by context
-  const groupedElements = useMemo(() => {
-    let filtered = elements;
-
-    // Filter by search
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (el) =>
-          el.name?.toLowerCase().includes(query) ||
-          el.current_value?.toString().toLowerCase().includes(query)
-      );
-    }
-
-    // Filter by type
-    if (filterType !== "all") {
-      filtered = filtered.filter((el) => el.type === filterType);
-    }
-
-    // Group by context
-    const groups = {};
-    filtered.forEach((el) => {
-      const ctx = el.context || "General";
-      if (!groups[ctx]) groups[ctx] = [];
-      groups[ctx].push(el);
-    });
-
-    return groups;
-  }, [elements, searchQuery, filterType]);
-
-  // Realtime subscription
+  // Load tienda data
   useEffect(() => {
     if (!supabase) return;
 
-    const channel = supabase
-      .channel(`elements-${siteId}`)
+    const loadData = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        // Try to find tienda by slug or by hostname match
+        const { data: tiendaData, error: tiendaError } = await supabase
+          .from("tiendas")
+          .select("*")
+          .or(`slug.eq.${siteId},url_web.ilike.%${siteId}%`)
+          .limit(1)
+          .maybeSingle();
+
+        if (tiendaError) throw tiendaError;
+
+        if (!tiendaData) {
+          setError(`No se encontró una tienda con el identificador "${siteId}". Verifica que el slug esté configurado correctamente en el Dashboard.`);
+          setLoading(false);
+          return;
+        }
+
+        setTienda(tiendaData);
+
+        // Load productos
+        const { data: productosData } = await supabase
+          .from("productos")
+          .select("*")
+          .eq("tienda_id", tiendaData.id)
+          .order("nombre", { ascending: true });
+
+        setProductos(productosData || []);
+
+        // Load testimonios
+        const { data: testimoniosData } = await supabase
+          .from("testimonios")
+          .select("*")
+          .eq("tienda_id", tiendaData.id)
+          .order("orden", { ascending: true });
+
+        setTestimonios(testimoniosData || []);
+
+      } catch (err) {
+        console.error("Load error:", err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [siteId, supabase]);
+
+  // Realtime subscriptions
+  useEffect(() => {
+    if (!supabase || !tienda) return;
+
+    const productosChannel = supabase
+      .channel(`productos-${tienda.id}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
-          table: "elements",
-          filter: `site_id=eq.${siteId}`,
+          table: "productos",
+          filter: `tienda_id=eq.${tienda.id}`,
         },
         (payload) => {
-          if (payload.eventType === "UPDATE") {
-            setElements((prev) =>
-              prev.map((el) =>
-                el.element_id === payload.new.element_id ? payload.new : el
-              )
-            );
-          } else if (payload.eventType === "INSERT") {
-            setElements((prev) => [...prev, payload.new]);
+          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+            setProductos((prev) => {
+              const idx = prev.findIndex((p) => p.id === payload.new.id);
+              if (idx >= 0) {
+                const updated = [...prev];
+                updated[idx] = payload.new;
+                return updated;
+              }
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === "DELETE") {
+            setProductos((prev) => prev.filter((p) => p.id !== payload.old.id));
           }
         }
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [siteId, supabase]);
+    const tiendaChannel = supabase
+      .channel(`tienda-${tienda.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "tiendas",
+          filter: `id=eq.${tienda.id}`,
+        },
+        (payload) => {
+          setTienda(payload.new);
+        }
+      )
+      .subscribe();
 
-  // Update element value
-  const handleUpdate = useCallback(async (elementId, newValue) => {
+    return () => {
+      supabase.removeChannel(productosChannel);
+      supabase.removeChannel(tiendaChannel);
+    };
+  }, [tienda?.id, supabase]);
+
+  // Update producto
+  const handleUpdateProducto = useCallback(async (productoId, field, value) => {
     if (!supabase) return;
 
     setIsSaving(true);
     setSaveStatus("saving");
 
     try {
+      const updateData = { [field]: field === "precio" ? parseFloat(value) || 0 : value };
+
       const { error } = await supabase
-        .from("elements")
-        .update({ current_value: newValue })
-        .eq("site_id", siteId)
-        .eq("element_id", elementId);
+        .from("productos")
+        .update(updateData)
+        .eq("id", productoId);
 
       if (error) throw error;
 
       // Update local state
-      setElements((prev) =>
-        prev.map((el) =>
-          el.element_id === elementId ? { ...el, current_value: newValue } : el
-        )
+      setProductos((prev) =>
+        prev.map((p) => (p.id === productoId ? { ...p, ...updateData } : p))
       );
 
       // Notify iframe
       iframeRef.current?.contentWindow?.postMessage(
-        { type: "mineiro-update", elementId, value: newValue },
+        { type: "mineiro-update", productoId, field, value },
         "*"
       );
 
@@ -365,20 +484,54 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
     } finally {
       setIsSaving(false);
     }
-  }, [siteId, supabase]);
+  }, [supabase]);
 
-  // Refresh scan
-  const handleRefreshScan = async () => {
-    if (!iframeRef.current?.contentWindow) return;
-    iframeRef.current.contentWindow.postMessage({ type: "mineiro-rescan" }, "*");
-    
-    // Reload elements
-    const { data } = await supabase
-      .from("elements")
-      .select("*")
-      .eq("site_id", siteId);
-    
-    if (data) setElements(data);
+  // Update site config
+  const handleUpdateSiteConfig = useCallback(async (section, field, value) => {
+    if (!supabase || !tienda) return;
+
+    setIsSaving(true);
+    setSaveStatus("saving");
+
+    try {
+      const siteConfig = tienda.site_config || {};
+      
+      if (!siteConfig[section]) {
+        siteConfig[section] = {};
+      }
+      siteConfig[section][field] = value;
+
+      const { error } = await supabase
+        .from("tiendas")
+        .update({ site_config: siteConfig })
+        .eq("id", tienda.id);
+
+      if (error) throw error;
+
+      setTienda((prev) => ({ ...prev, site_config: siteConfig }));
+
+      // Notify iframe
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: "mineiro-update", section, field, value },
+        "*"
+      );
+
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus(null), 2000);
+    } catch (err) {
+      console.error("Save error:", err);
+      setSaveStatus("error");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [supabase, tienda]);
+
+  // Refresh iframe
+  const handleRefreshPreview = () => {
+    if (iframeRef.current) {
+      iframeRef.current.src = iframeRef.current.src;
+      setIframeLoaded(false);
+    }
   };
 
   const previewSizes = {
@@ -387,7 +540,53 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
     desktop: { width: "100%", label: "Desktop" },
   };
 
-  const siteUrl = site?.url || `https://${siteId.replace(/-/g, ".")}`;
+  const siteUrl = tienda?.url_web || site?.url || `https://${siteId.replace(/-/g, ".")}`;
+  const siteConfig = tienda?.site_config || {};
+
+  // Filter productos by search
+  const filteredProductos = useMemo(() => {
+    if (!searchQuery) return productos;
+    const query = searchQuery.toLowerCase();
+    return productos.filter(
+      (p) =>
+        p.nombre?.toLowerCase().includes(query) ||
+        p.categoria?.toLowerCase().includes(query)
+    );
+  }, [productos, searchQuery]);
+
+  // Error state
+  if (error) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-8">
+        <div className="max-w-md text-center">
+          <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-rose-500/20 flex items-center justify-center">
+            <AlertCircle size={40} className="text-rose-400" />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-3">Tienda no encontrada</h1>
+          <p className="text-slate-400 mb-6">{error}</p>
+          <a
+            href="/dashboard"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-cyan-500 text-white font-medium hover:bg-cyan-400 transition-colors"
+          >
+            <Home size={18} />
+            Ir al Dashboard
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 size={48} className="mx-auto text-cyan-400 animate-spin mb-4" />
+          <p className="text-slate-400">Cargando editor...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -396,12 +595,12 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
         <div className="flex items-center gap-4">
           <a href="/dashboard" className="flex items-center gap-2 text-amber-400 font-bold">
             <Zap size={20} />
-            <span>Mineiro</span>
+            <span>Mineiro Editor</span>
           </a>
           <div className="h-6 w-px bg-slate-700" />
           <div className="flex items-center gap-2 text-sm">
             <Globe size={14} className="text-slate-400" />
-            <span className="text-slate-300">{site?.url || siteId}</span>
+            <span className="text-slate-300">{tienda?.nombre_negocio || siteId}</span>
           </div>
         </div>
 
@@ -447,11 +646,11 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
           </div>
 
           <button
-            onClick={handleRefreshScan}
+            onClick={handleRefreshPreview}
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors text-sm"
           >
             <RefreshCw size={14} />
-            Re-escanear
+            Refrescar
           </button>
 
           <a
@@ -470,84 +669,183 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Editor */}
         <aside className="w-[420px] border-r border-slate-800 bg-slate-900/50 flex flex-col flex-shrink-0">
-          {/* Search & Filters */}
-          <div className="p-4 border-b border-slate-800 space-y-3">
-            <div className="relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar elementos..."
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700 text-slate-100 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
-              />
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setFilterType("all")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  filterType === "all"
-                    ? "bg-cyan-500 text-white"
-                    : "bg-slate-800 text-slate-400 hover:text-white"
-                }`}
-              >
-                Todos ({elements.length})
-              </button>
-              {Object.entries(ElementTypeConfig).map(([type, config]) => {
-                const count = elements.filter((e) => e.type === type).length;
-                if (count === 0) return null;
-                return (
-                  <button
-                    key={type}
-                    onClick={() => setFilterType(type)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      filterType === type
-                        ? "bg-cyan-500 text-white"
-                        : "bg-slate-800 text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    {config.label} ({count})
-                  </button>
-                );
-              })}
-            </div>
+          {/* Tabs */}
+          <div className="flex border-b border-slate-800">
+            <button
+              onClick={() => setActiveTab("productos")}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+                activeTab === "productos"
+                  ? "text-cyan-400 border-b-2 border-cyan-400 bg-slate-800/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Package size={16} />
+              Productos
+            </button>
+            <button
+              onClick={() => setActiveTab("hero")}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+                activeTab === "hero"
+                  ? "text-violet-400 border-b-2 border-violet-400 bg-slate-800/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Layout size={16} />
+              Hero
+            </button>
+            <button
+              onClick={() => setActiveTab("footer")}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+                activeTab === "footer"
+                  ? "text-amber-400 border-b-2 border-amber-400 bg-slate-800/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <FileText size={16} />
+              Footer
+            </button>
           </div>
 
-          {/* Elements List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {Object.keys(groupedElements).length === 0 ? (
-              <div className="text-center py-8">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-500/10 flex items-center justify-center">
-                  <span className="text-3xl">🔍</span>
+          {/* Tab Content */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {/* Productos Tab */}
+            {activeTab === "productos" && (
+              <div className="space-y-4">
+                {/* Search */}
+                <div className="relative">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Buscar productos..."
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700 text-slate-100 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
+                  />
                 </div>
-                <p className="text-slate-300 font-medium mb-2">
-                  {searchQuery ? "Sin resultados" : "Esperando elementos..."}
-                </p>
-                <p className="text-sm text-slate-500 mb-4 max-w-xs mx-auto">
-                  {searchQuery 
-                    ? "Intenta con otra búsqueda" 
-                    : "Asegúrate de que el script de Mineiro esté instalado en la web del cliente."}
-                </p>
-                {!searchQuery && (
-                  <div className="bg-slate-800/50 rounded-xl p-4 text-left max-w-sm mx-auto">
-                    <p className="text-xs text-slate-400 mb-2">El cliente debe pegar esto antes de &lt;/body&gt;:</p>
-                    <code className="text-xs text-amber-300 break-all">
-                      &lt;script src=&quot;{typeof window !== 'undefined' ? window.location.origin : ''}/mineiro.js&quot; data-mineiro-site=&quot;{siteId}&quot;&gt;&lt;/script&gt;
-                    </code>
-                  </div>
-                )}
+
+                {/* Products Grid */}
+                <div className="grid gap-4">
+                  {filteredProductos.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Package size={40} className="mx-auto text-slate-600 mb-3" />
+                      <p className="text-slate-400 text-sm">
+                        {searchQuery ? "No se encontraron productos" : "No hay productos"}
+                      </p>
+                      <a
+                        href="/dashboard"
+                        className="inline-block mt-3 text-sm text-cyan-400 hover:text-cyan-300"
+                      >
+                        Agregar productos en Dashboard →
+                      </a>
+                    </div>
+                  ) : (
+                    filteredProductos.map((producto) => (
+                      <ProductCard
+                        key={producto.id}
+                        producto={producto}
+                        onUpdate={handleUpdateProducto}
+                        isSaving={isSaving}
+                      />
+                    ))
+                  )}
+                </div>
               </div>
-            ) : (
-              Object.entries(groupedElements).map(([context, contextElements]) => (
-                <ContextGroup
-                  key={context}
-                  context={context}
-                  elements={contextElements}
-                  onUpdate={handleUpdate}
+            )}
+
+            {/* Hero Tab */}
+            {activeTab === "hero" && (
+              <div className="space-y-4">
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold text-white mb-1">Configuración del Hero</h3>
+                  <p className="text-sm text-slate-400">Edita el banner principal de tu sitio</p>
+                </div>
+
+                <ConfigField
+                  label="Título Principal"
+                  value={siteConfig.hero?.titulo}
+                  onSave={(val) => handleUpdateSiteConfig("hero", "titulo", val)}
                   isSaving={isSaving}
+                  icon={Type}
                 />
-              ))
+
+                <ConfigField
+                  label="Subtítulo"
+                  value={siteConfig.hero?.subtitulo}
+                  onSave={(val) => handleUpdateSiteConfig("hero", "subtitulo", val)}
+                  isSaving={isSaving}
+                  type="textarea"
+                  icon={FileText}
+                />
+
+                <ConfigField
+                  label="Texto del Botón"
+                  value={siteConfig.hero?.boton_texto}
+                  onSave={(val) => handleUpdateSiteConfig("hero", "boton_texto", val)}
+                  isSaving={isSaving}
+                  icon={MousePointer}
+                />
+
+                <ConfigField
+                  label="Imagen de Fondo"
+                  value={siteConfig.hero?.imagen_fondo}
+                  onSave={(val) => handleUpdateSiteConfig("hero", "imagen_fondo", val)}
+                  isSaving={isSaving}
+                  type="image"
+                  icon={Image}
+                />
+              </div>
+            )}
+
+            {/* Footer Tab */}
+            {activeTab === "footer" && (
+              <div className="space-y-4">
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold text-white mb-1">Configuración del Footer</h3>
+                  <p className="text-sm text-slate-400">Edita la información del pie de página</p>
+                </div>
+
+                <ConfigField
+                  label="Nombre del Negocio"
+                  value={siteConfig.footer?.nombre_tienda || tienda?.nombre_negocio}
+                  onSave={(val) => handleUpdateSiteConfig("footer", "nombre_tienda", val)}
+                  isSaving={isSaving}
+                  icon={Type}
+                />
+
+                <ConfigField
+                  label="Descripción"
+                  value={siteConfig.footer?.descripcion}
+                  onSave={(val) => handleUpdateSiteConfig("footer", "descripcion", val)}
+                  isSaving={isSaving}
+                  type="textarea"
+                  icon={FileText}
+                />
+
+                <ConfigField
+                  label="WhatsApp"
+                  value={siteConfig.footer?.whatsapp}
+                  onSave={(val) => handleUpdateSiteConfig("footer", "whatsapp", val)}
+                  isSaving={isSaving}
+                  icon={MessageSquare}
+                />
+
+                <ConfigField
+                  label="Email"
+                  value={siteConfig.footer?.email}
+                  onSave={(val) => handleUpdateSiteConfig("footer", "email", val)}
+                  isSaving={isSaving}
+                  icon={Link2}
+                />
+
+                <ConfigField
+                  label="Horario de Atención"
+                  value={siteConfig.footer?.horario}
+                  onSave={(val) => handleUpdateSiteConfig("footer", "horario", val)}
+                  isSaving={isSaving}
+                  type="textarea"
+                  icon={FileText}
+                />
+              </div>
             )}
           </div>
 
@@ -555,10 +853,10 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
           <div className="p-4 border-t border-slate-800 bg-slate-900/80">
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-400">
-                {elements.length} elementos detectados
+                {productos.length} productos
               </span>
               <span className="text-slate-500">
-                Última actualización: {site?.last_scan ? new Date(site.last_scan).toLocaleString("es-CL") : "Nunca"}
+                {tienda?.plan || "trial"} · {tienda?.estado_pago ? "Activo" : "Trial"}
               </span>
             </div>
           </div>
@@ -587,7 +885,7 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
               src={`${siteUrl}?mineiro-preview=true`}
               className="w-full h-full border-0"
               onLoad={() => setIframeLoaded(true)}
-              sandbox="allow-same-origin allow-scripts allow-forms"
+              sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
             />
           </div>
 

@@ -1,84 +1,39 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   MINEIRO ENGINE v4 - Universal Site Editor
+   MINEIRO UNIFIED ENGINE v5 - Editor Visual Universal
    "Una línea de código. Control total."
    
-   Este script hace TODO:
-   1. Escanea la página y detecta elementos editables automáticamente
-   2. Sincroniza con Supabase en tiempo real
-   3. Aplica los valores guardados a los elementos
-   4. Permite edición visual inline (modo admin)
+   Este script:
+   1. Carga datos desde las tablas ORIGINALES (tiendas, productos, testimonios)
+   2. Hidrata los elementos con data-mineiro-bind
+   3. Permite edición visual inline (modo admin)
+   4. Guarda cambios directamente en las tablas originales
    ═══════════════════════════════════════════════════════════════════════════ */
 
 (function() {
   "use strict";
 
-  const VERSION = "4.1.0";
+  const VERSION = "5.0.0";
   const SUPABASE_URL = "https://zzgyczbiufafthizurbv.supabase.co";
-  // Clave anon pública de Supabase - busca en el atributo del script o usa default
+  const SUPABASE_CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
+  
+  // Clave anon pública de Supabase
   const getSupabaseKey = () => {
     const script = document.querySelector("script[data-mineiro-key]");
     return script?.dataset.mineiroKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp6Z3ljemJpdWZhZnRoaXp1cmJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc2NDUyNDksImV4cCI6MjA1MzIyMTI0OX0.SsJEBEVlvJPoHwrxNEKnAiF2mtv7Xa2OUBuhT0rGHiM";
   };
-  const SUPABASE_CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
-  const DASHBOARD_URL = "https://mineiro-clientes.vercel.app";
 
   /* ─────────────────────────────────────────────────────────────────────────
      UTILITIES
      ───────────────────────────────────────────────────────────────────────── */
 
-  const log = (msg, ...args) => console.log(`%c[Mineiro]%c ${msg}`, "color:#f59e0b;font-weight:bold", "color:inherit", ...args);
+  const log = (msg, ...args) => console.log(`%c[Mineiro v${VERSION}]%c ${msg}`, "color:#f59e0b;font-weight:bold", "color:inherit", ...args);
   const warn = (msg, ...args) => console.warn(`[Mineiro] ${msg}`, ...args);
 
-  // Genera un ID DETERMINÍSTICO basado SOLO en la posición del elemento
-  // NO usa el texto porque el texto puede cambiar después de la hidratación
-  const generateStableId = (el) => {
-    const tag = el.tagName.toLowerCase();
-    
-    // Calcular posición exacta del elemento en el DOM
-    const getPositionPath = (element) => {
-      const parts = [];
-      let current = element;
-      while (current && current !== document.body && current.parentNode) {
-        const parent = current.parentNode;
-        if (!parent.children) break;
-        
-        // Índice entre TODOS los hijos (no solo del mismo tag)
-        const allSiblings = Array.from(parent.children);
-        const idx = allSiblings.indexOf(current);
-        
-        // También contar índice entre hermanos del mismo tipo
-        const sameSiblings = allSiblings.filter(c => c.tagName === current.tagName);
-        const sameIdx = sameSiblings.indexOf(current);
-        
-        parts.unshift(`${current.tagName.toLowerCase()}[${idx}:${sameIdx}]`);
-        current = parent;
-        
-        if (parts.length > 6) break; // Limitar profundidad
-      }
-      return parts.join("/");
-    };
-    
-    const path = getPositionPath(el);
-    
-    // Crear un hash simple pero estable basado SOLO en posición
-    const input = `${path}`;
-    let hash = 0;
-    for (let i = 0; i < input.length; i++) {
-      const char = input.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    
-    // Convertir a string positivo
-    const hashStr = Math.abs(hash).toString(36);
-    return `m-${tag}-${hashStr}`;
-  };
-
-  const formatPrice = (value, currency = "CLP") => {
+  const formatCLP = (value) => {
     try {
       return new Intl.NumberFormat("es-CL", {
         style: "currency",
-        currency,
+        currency: "CLP",
         maximumFractionDigits: 0,
       }).format(value);
     } catch {
@@ -88,302 +43,38 @@
 
   const parsePrice = (text) => {
     if (!text) return null;
-    const cleaned = text.replace(/[^\d.,]/g, "").replace(",", ".");
+    if (typeof text === 'number') return text;
+    const cleaned = String(text).replace(/[^\d.,]/g, "").replace(",", ".");
     const num = parseFloat(cleaned);
     return isNaN(num) ? null : num;
   };
 
-  const getXPath = (el) => {
-    if (!el || el.nodeType !== 1) return "";
-    if (el.id) return `//*[@id="${el.id}"]`;
-    if (el === document.body) return "/html/body";
-    
-    let ix = 0;
-    const siblings = el.parentNode?.childNodes || [];
-    for (let i = 0; i < siblings.length; i++) {
-      const sibling = siblings[i];
-      if (sibling === el) {
-        const parentPath = getXPath(el.parentNode);
-        const tagName = el.tagName.toLowerCase();
-        return `${parentPath}/${tagName}[${ix + 1}]`;
-      }
-      if (sibling.nodeType === 1 && sibling.tagName === el.tagName) {
-        ix++;
-      }
-    }
-    return "";
+  const escapeHtml = (text) => {
+    const d = document.createElement("div");
+    d.textContent = text ?? "";
+    return d.innerHTML;
   };
 
-  const getElementByXPath = (xpath) => {
-    try {
-      const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-      return result.singleNodeValue;
-    } catch {
-      return null;
-    }
+  const getNestedValue = (obj, path) => {
+    return path.split(".").reduce((acc, key) => {
+      if (acc == null) return undefined;
+      const idx = parseInt(key, 10);
+      return !isNaN(idx) ? acc[idx] : acc[key];
+    }, obj);
   };
 
-  /* ─────────────────────────────────────────────────────────────────────────
-     ELEMENT DETECTION - Detecta qué tipo de elemento es
-     ───────────────────────────────────────────────────────────────────────── */
-
-  const ElementTypes = {
-    PRICE: "price",
-    TITLE: "title",
-    SUBTITLE: "subtitle",
-    PARAGRAPH: "paragraph",
-    IMAGE: "image",
-    BUTTON: "button",
-    LINK: "link",
-    LIST_ITEM: "list_item",
-    BADGE: "badge",
-    ICON: "icon",
-    VIDEO: "video",
-    FORM_LABEL: "form_label",
-    UNKNOWN: "unknown"
-  };
-
-  const detectElementType = (el) => {
-    const tag = el.tagName?.toLowerCase();
-    const text = el.textContent?.trim() || "";
-    const classList = Array.from(el.classList || []).join(" ").toLowerCase();
-    const style = window.getComputedStyle(el);
-    
-    // Precio - detecta formatos de moneda
-    const pricePatterns = [
-      /^\$\s*[\d.,]+/,           // $1.234 o $ 1234
-      /^[\d.,]+\s*\$$/,          // 1234$ o 1.234 $
-      /^CLP\s*[\d.,]+/i,         // CLP 1234
-      /^[\d.,]+\s*CLP$/i,        // 1234 CLP
-      /^\$[\d.,]+\s*-\s*\$[\d.,]+/, // Rangos: $100 - $200
-    ];
-    if (pricePatterns.some(p => p.test(text)) || 
-        classList.includes("price") || classList.includes("precio") ||
-        el.dataset.price !== undefined) {
-      return ElementTypes.PRICE;
-    }
-
-    // Imagen
-    if (tag === "img" || (tag === "div" && style.backgroundImage !== "none")) {
-      return ElementTypes.IMAGE;
-    }
-
-    // Video
-    if (tag === "video" || tag === "iframe") {
-      return ElementTypes.VIDEO;
-    }
-
-    // Botón
-    if (tag === "button" || (tag === "a" && classList.includes("btn")) ||
-        el.role === "button" || classList.includes("button") || classList.includes("cta")) {
-      return ElementTypes.BUTTON;
-    }
-
-    // Títulos
-    if (/^h[1-3]$/.test(tag) || classList.includes("title") || classList.includes("heading")) {
-      return ElementTypes.TITLE;
-    }
-
-    // Subtítulos
-    if (/^h[4-6]$/.test(tag) || classList.includes("subtitle") || classList.includes("subheading")) {
-      return ElementTypes.SUBTITLE;
-    }
-
-    // Badge/Etiqueta
-    if (classList.includes("badge") || classList.includes("tag") || classList.includes("label") ||
-        classList.includes("chip") || classList.includes("pill")) {
-      return ElementTypes.BADGE;
-    }
-
-    // Link
-    if (tag === "a" && !classList.includes("btn")) {
-      return ElementTypes.LINK;
-    }
-
-    // Párrafo
-    if (tag === "p" || classList.includes("description") || classList.includes("text")) {
-      return ElementTypes.PARAGRAPH;
-    }
-
-    // Lista item
-    if (tag === "li") {
-      return ElementTypes.LIST_ITEM;
-    }
-
-    // Label de formulario
-    if (tag === "label") {
-      return ElementTypes.FORM_LABEL;
-    }
-
-    // Elemento con texto que parece contenido
-    if (text.length > 0 && text.length < 500 && 
-        !["script", "style", "noscript", "meta", "link"].includes(tag)) {
-      return ElementTypes.PARAGRAPH;
-    }
-
-    return ElementTypes.UNKNOWN;
-  };
-
-  /* ─────────────────────────────────────────────────────────────────────────
-     SMART SCANNER - Escanea la página y detecta elementos editables
-     ───────────────────────────────────────────────────────────────────────── */
-
-  const scanPage = () => {
-    const elements = [];
-    const seen = new Set();
-
-    // Selectores para encontrar elementos editables
-    const selectors = [
-      // Precios
-      "[class*='price']", "[class*='precio']", "[data-price]",
-      // Títulos
-      "h1", "h2", "h3", "h4", "h5", "h6",
-      "[class*='title']", "[class*='heading']",
-      // Textos
-      "p", "[class*='description']", "[class*='text']", "[class*='content']",
-      // Imágenes
-      "img", "[class*='image']", "[class*='img']", "[class*='photo']", "[class*='banner']",
-      // Botones
-      "button", "[class*='btn']", "[class*='button']", "[class*='cta']",
-      // Links importantes
-      "a[class*='btn']", "a[class*='button']", "a[class*='cta']",
-      // Badges
-      "[class*='badge']", "[class*='tag']", "[class*='label']",
-      // Listas de productos
-      "[class*='product']", "[class*='item']", "[class*='card']",
-    ];
-
-    const processElement = (el) => {
-      // Skip elementos ya procesados, scripts, styles, etc.
-      if (seen.has(el)) return;
-      if (!el.tagName) return;
-      
-      const tag = el.tagName.toLowerCase();
-      if (["script", "style", "noscript", "meta", "link", "head", "html"].includes(tag)) return;
-      
-      // Skip elementos ocultos
-      const style = window.getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden") return;
-      
-      // Skip elementos vacíos (excepto imágenes)
-      const text = el.textContent?.trim();
-      if (!text && tag !== "img" && !style.backgroundImage) return;
-
-      seen.add(el);
-
-      const type = detectElementType(el);
-      if (type === ElementTypes.UNKNOWN) return;
-
-      // Generar o usar ID existente - SIEMPRE usar ID estable basado en contenido
-      let elementId = el.id || el.dataset.mineiroId;
-      if (!elementId) {
-        elementId = generateStableId(el);
-        el.dataset.mineiroId = elementId;
+  const setNestedValue = (obj, path, value) => {
+    const keys = path.split(".");
+    const lastKey = keys.pop();
+    let current = obj;
+    for (const key of keys) {
+      if (current[key] === undefined) {
+        current[key] = {};
       }
-
-      // Extraer valor actual
-      let currentValue;
-      let extraData = {};
-
-      switch (type) {
-        case ElementTypes.PRICE:
-          currentValue = parsePrice(text) || text;
-          extraData.formattedPrice = text;
-          break;
-        case ElementTypes.IMAGE:
-          currentValue = el.src || style.backgroundImage.replace(/url\(['"]?(.+?)['"]?\)/i, "$1");
-          extraData.alt = el.alt || "";
-          break;
-        case ElementTypes.BUTTON:
-        case ElementTypes.LINK:
-          currentValue = text;
-          extraData.href = el.href || "";
-          break;
-        default:
-          currentValue = text;
-      }
-
-      // Detectar contexto (para agrupar elementos relacionados)
-      const parent = el.closest("[class*='product'], [class*='card'], [class*='item'], section, article");
-      const context = parent ? (parent.id || parent.className.split(" ")[0] || "main") : "main";
-
-      // Crear nombre legible
-      const readableName = generateReadableName(el, type, context);
-
-      elements.push({
-        id: elementId,
-        type,
-        xpath: getXPath(el),
-        selector: generateSelector(el),
-        currentValue,
-        context,
-        name: readableName,
-        tag,
-        classes: Array.from(el.classList || []),
-        ...extraData
-      });
-    };
-
-    // Buscar elementos con los selectores
-    selectors.forEach(selector => {
-      try {
-        document.querySelectorAll(selector).forEach(processElement);
-      } catch (e) {
-        // Selector inválido, skip
-      }
-    });
-
-    // También buscar elementos con data-mineiro-*
-    document.querySelectorAll("[data-mineiro-edit]").forEach(processElement);
-
-    log(`Escaneados ${elements.length} elementos editables`);
-    return elements;
-  };
-
-  const generateSelector = (el) => {
-    if (el.id) return `#${el.id}`;
-    if (el.dataset.mineiroId) return `[data-mineiro-id="${el.dataset.mineiroId}"]`;
-    
-    // Generar selector basado en clases únicas
-    const classes = Array.from(el.classList || []).filter(c => !c.startsWith("m-"));
-    if (classes.length > 0) {
-      const selector = `.${classes.join(".")}`;
-      if (document.querySelectorAll(selector).length === 1) {
-        return selector;
-      }
+      current = current[key];
     }
-    
-    return `[data-mineiro-id="${el.dataset.mineiroId || generateStableId(el)}"]`;
-  };
-
-  const generateReadableName = (el, type, context) => {
-    const tag = el.tagName.toLowerCase();
-    const text = (el.textContent || "").trim().slice(0, 30);
-    const alt = el.alt || "";
-    
-    const typeNames = {
-      [ElementTypes.PRICE]: "Precio",
-      [ElementTypes.TITLE]: "Título",
-      [ElementTypes.SUBTITLE]: "Subtítulo",
-      [ElementTypes.PARAGRAPH]: "Texto",
-      [ElementTypes.IMAGE]: "Imagen",
-      [ElementTypes.BUTTON]: "Botón",
-      [ElementTypes.LINK]: "Enlace",
-      [ElementTypes.BADGE]: "Etiqueta",
-      [ElementTypes.LIST_ITEM]: "Item",
-    };
-
-    const typeName = typeNames[type] || "Elemento";
-    
-    if (type === ElementTypes.IMAGE) {
-      return alt ? `${typeName}: ${alt}` : `${typeName} en ${context}`;
-    }
-    
-    if (text) {
-      return `${typeName}: "${text}${text.length >= 30 ? "..." : ""}"`;
-    }
-    
-    return `${typeName} en ${context}`;
+    current[lastKey] = value;
+    return obj;
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -391,8 +82,9 @@
      ───────────────────────────────────────────────────────────────────────── */
 
   let supabase = null;
-  let siteData = null;
-  let elementsData = {};
+  let tiendaData = null;
+  let productosCache = [];
+  let testimoniosCache = [];
 
   const loadSupabase = () =>
     new Promise((resolve, reject) => {
@@ -414,316 +106,425 @@
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     DATA SYNC - Sincroniza elementos con Supabase
+     DATA FETCHING
      ───────────────────────────────────────────────────────────────────────── */
 
   const getSiteId = () => {
-    // Obtener de script, meta, o generar desde hostname
     const script = document.querySelector("script[data-mineiro-site]");
     if (script?.dataset.mineiroSite) return script.dataset.mineiroSite;
     
     const meta = document.querySelector("meta[name='mineiro-site']");
     if (meta?.content) return meta.content;
     
-    // Usar hostname como fallback
     return window.location.hostname.replace(/\./g, "-");
   };
 
-  const fetchSiteData = async (siteId) => {
+  const fetchTienda = async (slug) => {
+    // Intentar buscar por slug, luego por hostname en url_web
+    const hostname = window.location.hostname;
+    
     const { data, error } = await supabase
-      .from("sites")
-      .select("*, elements(*)")
-      .eq("site_id", siteId)
+      .from("tiendas")
+      .select("*")
+      .or(`slug.eq.${slug},url_web.ilike.%${hostname}%`)
+      .limit(1)
       .maybeSingle();
     
-    if (error && error.code !== "PGRST116") {
-      warn("Error fetching site:", error.message);
+    if (error && error.code !== 'PGRST116') {
+      warn("Error fetching tienda:", error.message);
     }
-    
     return data;
   };
 
-  const saveSiteMap = async (siteId, elements) => {
-    // Crear o actualizar el sitio
-    const { data: site, error: siteError } = await supabase
-      .from("sites")
-      .upsert({
-        site_id: siteId,
-        url: window.location.origin,
-        last_scan: new Date().toISOString(),
-        element_count: elements.length,
-      }, { onConflict: "site_id" })
-      .select()
-      .single();
-
-    if (siteError) {
-      warn("Error saving site:", siteError.message);
-      return null;
-    }
-
-    // Guardar elementos detectados - SIN sobreescribir current_value si ya existe
-    for (const el of elements) {
-      // Verificar si el elemento ya existe
-      const { data: existing } = await supabase
-        .from("elements")
-        .select("id, current_value")
-        .eq("site_id", siteId)
-        .eq("element_id", el.id)
-        .maybeSingle();
-
-      if (existing) {
-        // Ya existe - solo actualizar metadata, NO tocar current_value
-        await supabase
-          .from("elements")
-          .update({
-            type: el.type,
-            name: el.name,
-            xpath: el.xpath,
-            selector: el.selector,
-            context: el.context,
-            metadata: {
-              tag: el.tag,
-              classes: el.classes,
-              href: el.href,
-              alt: el.alt,
-            }
-          })
-          .eq("id", existing.id);
-      } else {
-        // No existe - crear nuevo
-        await supabase
-          .from("elements")
-          .insert({
-            site_id: siteId,
-            element_id: el.id,
-            type: el.type,
-            name: el.name,
-            xpath: el.xpath,
-            selector: el.selector,
-            context: el.context,
-            original_value: el.currentValue,
-            current_value: el.currentValue,
-            metadata: {
-              tag: el.tag,
-              classes: el.classes,
-              href: el.href,
-              alt: el.alt,
-            }
-          });
-      }
-    }
-
-    return site;
+  const fetchProductos = async (tiendaId) => {
+    const { data, error } = await supabase
+      .from("productos")
+      .select("*")
+      .eq("tienda_id", tiendaId)
+      .eq("visible", true)
+      .order("nombre", { ascending: true });
+    if (error) throw error;
+    return data ?? [];
   };
 
-  const loadSavedValues = async (siteId) => {
+  const fetchTestimonios = async (tiendaId) => {
     const { data, error } = await supabase
-      .from("elements")
-      .select("element_id, current_value, original_value, type, metadata, selector")
-      .eq("site_id", siteId);
-
-    if (error) {
-      warn("Error loading values:", error.message);
-      return {};
-    }
-
-    const values = {};
-    (data || []).forEach(el => {
-      // Solo incluir si current_value es diferente de original_value (fue editado)
-      if (el.current_value !== el.original_value && el.current_value !== null) {
-        values[el.element_id] = {
-          value: el.current_value,
-          type: el.type,
-          metadata: el.metadata,
-          selector: el.selector
-        };
-      }
-    });
-
-    log(`Encontrados ${Object.keys(values).length} elementos editados para hidratar`);
-    return values;
+      .from("testimonios")
+      .select("*")
+      .eq("tienda_id", tiendaId)
+      .eq("visible", true)
+      .order("orden", { ascending: true });
+    if (error && error.code !== "PGRST116") throw error;
+    return data ?? [];
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     HYDRATION - Aplica valores guardados a los elementos
+     BINDING PARSER
      ───────────────────────────────────────────────────────────────────────── */
 
-  const hydrateElement = (el, value, type, metadata = {}) => {
-    if (value === undefined || value === null) return;
+  const parseBinding = (binding) => {
+    if (!binding) return null;
 
-    const tag = el.tagName?.toLowerCase();
+    // Config tienda: "config-tienda.nombre_tienda"
+    if (binding.startsWith("config-tienda.")) {
+      return { type: "config", field: binding.replace("config-tienda.", "") };
+    }
 
-    switch (type) {
-      case ElementTypes.PRICE:
-        el.textContent = typeof value === "number" ? formatPrice(value) : value;
-        break;
+    // Hero: "hero.titulo"
+    if (binding.startsWith("hero.")) {
+      return { type: "hero", field: binding.replace("hero.", "") };
+    }
 
-      case ElementTypes.IMAGE:
-        if (tag === "img") {
-          el.src = value;
-          if (metadata.alt) el.alt = metadata.alt;
-        } else {
-          el.style.backgroundImage = `url('${value}')`;
-        }
-        break;
+    // Footer: "footer.descripcion"
+    if (binding.startsWith("footer.")) {
+      return { type: "footer", field: binding.replace("footer.", "") };
+    }
 
-      case ElementTypes.BUTTON:
-      case ElementTypes.LINK:
+    // Testimonios config: "testimonios-config.titulo"
+    if (binding.startsWith("testimonios-config.")) {
+      return { type: "testimonios-config", field: binding.replace("testimonios-config.", "") };
+    }
+
+    // Testimonio individual: "testimonio-{dom_id}.nombre"
+    const testimonioMatch = binding.match(/^testimonio-([a-zA-Z0-9\-_]+)\.(.+)$/);
+    if (testimonioMatch) {
+      return { type: "testimonio", domId: testimonioMatch[1], field: testimonioMatch[2] };
+    }
+
+    // Producto: "producto-{dom_id}.nombre"
+    const productoMatch = binding.match(/^producto-([a-zA-Z0-9\-_]+)\.(.+)$/);
+    if (productoMatch) {
+      return { type: "producto", identifier: productoMatch[1], field: productoMatch[2] };
+    }
+
+    return null;
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     HYDRATION - Apply values to elements
+     ───────────────────────────────────────────────────────────────────────── */
+
+  const applyValueToElement = (el, value, field) => {
+    if (value === undefined || value === null) return false;
+
+    const tagName = el.tagName.toLowerCase();
+    const imageFields = ["imagen_url", "imagen", "imagen_fondo", "logo_url", "avatar"];
+    const isImageField = imageFields.some(f => field === f || field.endsWith(`.${f}`));
+
+    if (isImageField) {
+      if (tagName === "img") {
+        el.src = value;
+      } else {
+        el.style.backgroundImage = `url('${value}')`;
+      }
+    } else if (field.endsWith("_url") || field === "url" || field === "link") {
+      if (tagName === "a") {
+        el.href = value;
+      } else {
         el.textContent = value;
-        if (metadata.href) el.href = metadata.href;
-        break;
-
-      default:
-        el.textContent = value;
+      }
+    } else if (field === "precio" || field.endsWith(".precio")) {
+      el.textContent = typeof value === "number" ? formatCLP(value) : value;
+    } else if (field === "rating") {
+      const stars = parseInt(value, 10) || 0;
+      el.textContent = "★".repeat(stars) + "☆".repeat(Math.max(0, 5 - stars));
+    } else {
+      el.textContent = value;
     }
 
     el.dataset.mineiroHydrated = "true";
+    return true;
   };
 
-  const hydrateAll = (savedValues) => {
+  const hydrateElement = (el, tienda, productos, testimonios) => {
+    const binding = el.dataset.mineiroBind;
+    const parsed = parseBinding(binding);
+
+    if (!parsed) {
+      warn(`Invalid binding format: ${binding}`);
+      return;
+    }
+
+    let value;
+    const siteConfig = tienda?.site_config || {};
+
+    switch (parsed.type) {
+      case "config": {
+        value = getNestedValue(siteConfig.config, parsed.field) 
+             ?? getNestedValue(tienda, parsed.field)
+             ?? tienda?.[parsed.field === "nombre_tienda" ? "nombre_negocio" : parsed.field];
+        break;
+      }
+
+      case "hero": {
+        value = getNestedValue(siteConfig.hero, parsed.field);
+        break;
+      }
+
+      case "footer": {
+        value = getNestedValue(siteConfig.footer, parsed.field)
+             ?? (parsed.field === "nombre_tienda" ? tienda?.nombre_negocio : undefined);
+        break;
+      }
+
+      case "testimonios-config": {
+        value = getNestedValue(siteConfig.testimonios_config, parsed.field);
+        break;
+      }
+
+      case "testimonio": {
+        const testimonio = testimonios.find(t => t.dom_id === parsed.domId);
+        if (testimonio) {
+          value = getNestedValue(testimonio, parsed.field) ?? testimonio[parsed.field];
+        }
+        break;
+      }
+
+      case "producto": {
+        const producto = productos.find(p => p.dom_id === parsed.identifier)
+                      || productos.find(p => String(p.id) === parsed.identifier);
+        if (producto) {
+          value = parsed.field.includes(".")
+            ? getNestedValue(producto, parsed.field)
+            : producto[parsed.field];
+        }
+        break;
+      }
+    }
+
+    if (value !== undefined && value !== null) {
+      applyValueToElement(el, value, parsed.field);
+    }
+  };
+
+  const runHydration = (tienda, productos, testimonios) => {
+    const elements = document.querySelectorAll("[data-mineiro-bind]");
     let hydrated = 0;
-    let failed = 0;
-
-    Object.entries(savedValues).forEach(([elementId, data]) => {
-      // Buscar por múltiples métodos
-      let el = null;
-      let foundBy = "";
-      
-      // 1. Por ID nativo
-      el = document.getElementById(elementId);
-      if (el) foundBy = "id";
-      
-      // 2. Por data-mineiro-id
-      if (!el) {
-        el = document.querySelector(`[data-mineiro-id="${elementId}"]`);
-        if (el) foundBy = "data-mineiro-id";
-      }
-      
-      // 3. Por selector guardado
-      if (!el && data.selector) {
-        try {
-          el = document.querySelector(data.selector);
-          if (el) foundBy = "selector";
-        } catch (e) {
-          // Selector inválido
-        }
-      }
-      
-      // 4. Por selector en metadata
-      if (!el && data.metadata?.selector) {
-        try {
-          el = document.querySelector(data.metadata.selector);
-          if (el) foundBy = "metadata.selector";
-        } catch (e) {
-          // Selector inválido
-        }
-      }
-
-      if (el) {
-        hydrateElement(el, data.value, data.type, data.metadata);
+    elements.forEach((el) => {
+      try {
+        hydrateElement(el, tienda, productos, testimonios);
         hydrated++;
-        log(`✓ Hidratado "${elementId}" (${foundBy}) → "${data.value?.slice?.(0, 30) || data.value}"`);
-      } else {
-        failed++;
-        warn(`✗ No encontrado: "${elementId}" para valor "${data.value?.slice?.(0, 30) || data.value}"`);
+      } catch (err) {
+        warn(`Hydration error:`, err);
       }
     });
-
-    log(`Hidratación completada: ${hydrated} OK, ${failed} fallidos`);
+    log(`Hidratados ${hydrated} elementos`);
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     REALTIME UPDATES - Escucha cambios en tiempo real
+     REALTIME SUBSCRIPTIONS
      ───────────────────────────────────────────────────────────────────────── */
 
-  const subscribeToChanges = (siteId) => {
-    const channel = supabase
-      .channel(`site-${siteId}`)
+  const subscribeToChanges = (tiendaId) => {
+    // Subscribe to productos changes
+    supabase
+      .channel(`productos-${tiendaId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "productos",
+          filter: `tienda_id=eq.${tiendaId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+            const producto = payload.new;
+            // Update cache
+            const idx = productosCache.findIndex(p => p.id === producto.id);
+            if (idx >= 0) {
+              productosCache[idx] = producto;
+            } else {
+              productosCache.push(producto);
+            }
+            // Re-hydrate elements for this product
+            rehydrateProducto(producto);
+          }
+        }
+      )
+      .subscribe();
+
+    // Subscribe to tienda changes
+    supabase
+      .channel(`tienda-${tiendaId}`)
       .on(
         "postgres_changes",
         {
           event: "UPDATE",
           schema: "public",
-          table: "elements",
-          filter: `site_id=eq.${siteId}`,
+          table: "tiendas",
+          filter: `id=eq.${tiendaId}`,
         },
         (payload) => {
-          const { element_id, current_value, type, metadata } = payload.new;
-          
-          let el = document.getElementById(element_id) ||
-                   document.querySelector(`[data-mineiro-id="${element_id}"]`);
-          
-          if (el) {
-            hydrateElement(el, current_value, type, metadata);
-            log(`Actualizado en tiempo real: ${element_id}`);
+          tiendaData = payload.new;
+          runHydration(tiendaData, productosCache, testimoniosCache);
+        }
+      )
+      .subscribe();
+
+    // Subscribe to testimonios changes
+    supabase
+      .channel(`testimonios-${tiendaId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "testimonios",
+          filter: `tienda_id=eq.${tiendaId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+            const testimonio = payload.new;
+            const idx = testimoniosCache.findIndex(t => t.id === testimonio.id);
+            if (idx >= 0) {
+              testimoniosCache[idx] = testimonio;
+            } else {
+              testimoniosCache.push(testimonio);
+            }
+            rehydrateTestimonio(testimonio);
           }
         }
       )
       .subscribe();
 
     log("Suscrito a cambios en tiempo real");
-    return channel;
+  };
+
+  const rehydrateProducto = (producto) => {
+    if (!producto.dom_id) return;
+    
+    document.querySelectorAll(`[data-mineiro-bind^="producto-${producto.dom_id}."]`).forEach((el) => {
+      const binding = el.dataset.mineiroBind;
+      const parsed = parseBinding(binding);
+      if (parsed && parsed.type === "producto") {
+        const value = parsed.field.includes(".")
+          ? getNestedValue(producto, parsed.field)
+          : producto[parsed.field];
+        if (value !== undefined) {
+          applyValueToElement(el, value, parsed.field);
+        }
+      }
+    });
+  };
+
+  const rehydrateTestimonio = (testimonio) => {
+    if (!testimonio.dom_id) return;
+    
+    document.querySelectorAll(`[data-mineiro-bind^="testimonio-${testimonio.dom_id}."]`).forEach((el) => {
+      const binding = el.dataset.mineiroBind;
+      const parsed = parseBinding(binding);
+      if (parsed && parsed.type === "testimonio") {
+        const value = getNestedValue(testimonio, parsed.field) ?? testimonio[parsed.field];
+        if (value !== undefined) {
+          applyValueToElement(el, value, parsed.field);
+        }
+      }
+    });
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
-     ADMIN MODE - Edición visual inline
+     ADMIN MODE - Visual Inline Editing
      ───────────────────────────────────────────────────────────────────────── */
 
   let adminMode = false;
   let selectedElement = null;
+  let pendingChanges = new Map();
 
   const enableAdminMode = () => {
     if (adminMode) return;
     adminMode = true;
 
-    // Inyectar estilos de admin
+    // Inject admin styles
     const style = document.createElement("style");
     style.id = "mineiro-admin-styles";
     style.textContent = `
-      [data-mineiro-id]:hover {
+      [data-mineiro-bind] {
+        position: relative;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      [data-mineiro-bind]:hover {
         outline: 2px dashed #f59e0b !important;
         outline-offset: 2px;
-        cursor: pointer;
       }
-      [data-mineiro-id].mineiro-selected {
-        outline: 2px solid #06b6d4 !important;
-        outline-offset: 2px;
+      [data-mineiro-bind].mineiro-selected {
+        outline: 3px solid #06b6d4 !important;
+        outline-offset: 3px;
+      }
+      [data-mineiro-bind]::after {
+        content: '';
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        width: 20px;
+        height: 20px;
+        background: #f59e0b;
+        border-radius: 50%;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: #000;
+      }
+      [data-mineiro-bind]:hover::after {
+        opacity: 0.8;
+        content: '✏️';
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 20px;
+        text-align: center;
       }
       .mineiro-admin-bar {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
-        height: 48px;
+        height: 56px;
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        border-bottom: 1px solid #334155;
+        border-bottom: 2px solid #f59e0b;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 16px;
+        padding: 0 20px;
         z-index: 999999;
         font-family: system-ui, -apple-system, sans-serif;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
       }
       .mineiro-admin-bar * {
         box-sizing: border-box;
       }
       .mineiro-admin-logo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
         color: #f59e0b;
         font-weight: 700;
-        font-size: 16px;
+        font-size: 18px;
+      }
+      .mineiro-admin-hint {
+        color: #94a3b8;
+        font-size: 14px;
       }
       .mineiro-admin-actions {
         display: flex;
-        gap: 8px;
+        gap: 10px;
       }
       .mineiro-admin-btn {
-        padding: 8px 16px;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 500;
+        padding: 10px 20px;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 600;
         cursor: pointer;
         transition: all 0.15s;
         border: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
       .mineiro-admin-btn-primary {
         background: linear-gradient(135deg, #06b6d4, #8b5cf6);
@@ -733,58 +534,112 @@
         background: #334155;
         color: #e2e8f0;
       }
+      .mineiro-admin-btn-success {
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: white;
+      }
       .mineiro-admin-btn:hover {
         filter: brightness(1.1);
+        transform: translateY(-1px);
       }
       .mineiro-edit-popup {
         position: fixed;
-        background: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 16px;
-        min-width: 280px;
-        max-width: 400px;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border: 2px solid #334155;
+        border-radius: 16px;
+        padding: 20px;
+        min-width: 320px;
+        max-width: 450px;
+        box-shadow: 0 25px 50px rgba(0,0,0,0.5);
         z-index: 999999;
         font-family: system-ui, -apple-system, sans-serif;
+      }
+      .mineiro-edit-popup h3 {
+        margin: 0 0 4px 0;
+        color: #f1f5f9;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .mineiro-edit-popup .edit-type {
+        color: #94a3b8;
+        font-size: 12px;
+        margin-bottom: 16px;
+        padding: 4px 10px;
+        background: #334155;
+        border-radius: 6px;
+        display: inline-block;
       }
       .mineiro-edit-popup input,
       .mineiro-edit-popup textarea {
         width: 100%;
-        padding: 10px 12px;
-        border-radius: 8px;
-        border: 1px solid #475569;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 2px solid #475569;
         background: #0f172a;
         color: #f1f5f9;
-        font-size: 14px;
+        font-size: 15px;
         margin-top: 8px;
+        transition: border-color 0.2s;
+      }
+      .mineiro-edit-popup input:focus,
+      .mineiro-edit-popup textarea:focus {
+        outline: none;
+        border-color: #06b6d4;
       }
       .mineiro-edit-popup textarea {
-        min-height: 80px;
+        min-height: 100px;
         resize: vertical;
       }
       .mineiro-edit-popup label {
-        font-size: 12px;
+        font-size: 13px;
         color: #94a3b8;
         font-weight: 500;
       }
       .mineiro-edit-actions {
         display: flex;
-        gap: 8px;
-        margin-top: 12px;
+        gap: 10px;
+        margin-top: 16px;
+      }
+      .mineiro-image-preview {
+        width: 100%;
+        height: 120px;
+        border-radius: 10px;
+        background: #0f172a;
+        border: 2px dashed #475569;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        margin-bottom: 10px;
+      }
+      .mineiro-image-preview img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
       }
       body.mineiro-admin-active {
-        padding-top: 48px !important;
+        padding-top: 56px !important;
+      }
+      .mineiro-changes-badge {
+        background: #ef4444;
+        color: white;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        margin-left: 8px;
       }
     `;
     document.head.appendChild(style);
 
-    // Crear barra de admin
+    // Create admin bar
     const adminBar = document.createElement("div");
     adminBar.className = "mineiro-admin-bar";
     adminBar.innerHTML = `
-      <div class="mineiro-admin-logo">⚡ Mineiro Editor</div>
-      <div style="color:#94a3b8;font-size:13px">Haz clic en cualquier elemento para editarlo</div>
+      <div class="mineiro-admin-logo">
+        <span>⚡</span>
+        <span>Mineiro Editor</span>
+      </div>
+      <div class="mineiro-admin-hint">Haz clic en cualquier elemento para editarlo</div>
       <div class="mineiro-admin-actions">
         <button class="mineiro-admin-btn mineiro-admin-btn-secondary" onclick="window.MineiroAdmin.openDashboard()">
           📊 Panel Completo
@@ -797,10 +652,10 @@
     document.body.prepend(adminBar);
     document.body.classList.add("mineiro-admin-active");
 
-    // Click listener para edición
+    // Add click listener for editing
     document.addEventListener("click", handleAdminClick, true);
 
-    log("Modo admin activado");
+    log("Modo admin activado - Haz clic en cualquier elemento con data-mineiro-bind para editarlo");
   };
 
   const disableAdminMode = () => {
@@ -822,19 +677,19 @@
   };
 
   const handleAdminClick = (e) => {
-    // Ignorar clicks dentro del popup de edición
+    // Ignore clicks inside popup
     if (e.target.closest(".mineiro-edit-popup")) {
       return;
     }
 
-    // Ignorar clicks en la barra de admin
+    // Ignore clicks on admin bar
     if (e.target.closest(".mineiro-admin-bar")) {
       return;
     }
 
-    const el = e.target.closest("[data-mineiro-id]");
+    const el = e.target.closest("[data-mineiro-bind]");
     if (!el) {
-      // Click fuera de elementos editables - cerrar popup
+      // Click outside editable elements - close popup
       document.querySelector(".mineiro-edit-popup")?.remove();
       if (selectedElement) {
         selectedElement.classList.remove("mineiro-selected");
@@ -846,7 +701,7 @@
     e.preventDefault();
     e.stopPropagation();
 
-    // Deseleccionar anterior
+    // Deselect previous
     if (selectedElement) {
       selectedElement.classList.remove("mineiro-selected");
     }
@@ -858,65 +713,124 @@
   };
 
   const showEditPopup = (el) => {
-    // Remover popup anterior
     document.querySelector(".mineiro-edit-popup")?.remove();
 
-    const elementId = el.dataset.mineiroId;
-    const type = detectElementType(el);
-    const currentValue = type === ElementTypes.IMAGE 
-      ? (el.src || el.style.backgroundImage.replace(/url\(['"]?(.+?)['"]?\)/i, "$1"))
-      : el.textContent?.trim();
+    const binding = el.dataset.mineiroBind;
+    const parsed = parseBinding(binding);
+    
+    if (!parsed) {
+      warn("No se pudo parsear el binding:", binding);
+      return;
+    }
 
+    // Determine current value and type
+    const tagName = el.tagName.toLowerCase();
+    let currentValue = "";
+    let isImage = false;
+    let isLongText = false;
+    let isPrice = false;
+
+    const imageFields = ["imagen_url", "imagen", "imagen_fondo", "logo_url", "avatar"];
+    isImage = imageFields.some(f => parsed.field === f || parsed.field.endsWith(`.${f}`)) || tagName === "img";
+    isPrice = parsed.field === "precio" || parsed.field.endsWith(".precio");
+
+    if (isImage) {
+      currentValue = tagName === "img" 
+        ? el.src 
+        : el.style.backgroundImage.replace(/url\(['"]?(.+?)['"]?\)/i, "$1");
+    } else {
+      currentValue = el.textContent?.trim() || "";
+      if (isPrice) {
+        currentValue = parsePrice(currentValue) || "";
+      }
+    }
+
+    isLongText = !isImage && !isPrice && currentValue.length > 50;
+
+    // Position popup
     const rect = el.getBoundingClientRect();
     const popup = document.createElement("div");
     popup.className = "mineiro-edit-popup";
     
-    // Posicionar
-    let top = rect.bottom + 10 + window.scrollY;
+    let top = rect.bottom + 15 + window.scrollY;
     let left = rect.left + window.scrollX;
     
-    // Ajustar si se sale de la pantalla
-    if (left + 300 > window.innerWidth) {
-      left = window.innerWidth - 320;
+    if (left + 350 > window.innerWidth) {
+      left = window.innerWidth - 370;
     }
-    if (top + 200 > window.innerHeight + window.scrollY) {
-      top = rect.top - 210 + window.scrollY;
+    if (top + 250 > window.innerHeight + window.scrollY) {
+      top = rect.top - 260 + window.scrollY;
     }
     
-    popup.style.top = `${Math.max(60, top)}px`;
+    popup.style.top = `${Math.max(70, top)}px`;
     popup.style.left = `${Math.max(10, left)}px`;
 
-    const isTextarea = type === ElementTypes.PARAGRAPH || (currentValue && currentValue.length > 50);
-    const isPrice = type === ElementTypes.PRICE;
-    const escapedValue = (currentValue || "").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Type label for UI
+    const typeLabels = {
+      config: "Configuración",
+      hero: "Hero / Banner",
+      footer: "Footer",
+      "testimonios-config": "Config. Testimonios",
+      testimonio: "Testimonio",
+      producto: "Producto"
+    };
+    const typeLabel = typeLabels[parsed.type] || "Elemento";
+    const fieldLabel = parsed.field.replace(/_/g, " ").replace(/\./g, " › ");
+
+    // Escape values for HTML
+    const escapedValue = (currentValue || "").toString().replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
     popup.innerHTML = `
-      <label>Editar ${type === ElementTypes.IMAGE ? "URL de imagen" : "contenido"}</label>
-      ${isTextarea 
-        ? `<textarea id="mineiro-edit-input">${currentValue || ""}</textarea>`
-        : `<input ${isPrice ? 'type="number"' : 'type="text"'} id="mineiro-edit-input" value="${escapedValue}" />`
-      }
+      <h3>Editar contenido</h3>
+      <div class="edit-type">${typeLabel} › ${fieldLabel}</div>
+      
+      ${isImage ? `
+        <div class="mineiro-image-preview">
+          ${currentValue ? `<img src="${escapedValue}" alt="Preview" />` : '<span style="color:#64748b">Sin imagen</span>'}
+        </div>
+        <label>URL de la imagen</label>
+        <input type="url" id="mineiro-edit-input" value="${escapedValue}" placeholder="https://..." />
+      ` : isLongText ? `
+        <label>Texto</label>
+        <textarea id="mineiro-edit-input">${currentValue || ""}</textarea>
+      ` : isPrice ? `
+        <label>Precio (solo número)</label>
+        <input type="number" id="mineiro-edit-input" value="${escapedValue}" placeholder="1000" />
+      ` : `
+        <label>Contenido</label>
+        <input type="text" id="mineiro-edit-input" value="${escapedValue}" />
+      `}
+      
       <div class="mineiro-edit-actions">
-        <button type="button" class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-cancel-btn">
+        <button type="button" class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-cancel-btn" style="flex:1">
           Cancelar
         </button>
-        <button type="button" class="mineiro-admin-btn mineiro-admin-btn-primary" id="mineiro-save-btn">
+        <button type="button" class="mineiro-admin-btn mineiro-admin-btn-success" id="mineiro-save-btn" style="flex:1">
           💾 Guardar
         </button>
       </div>
     `;
 
     document.body.appendChild(popup);
-    
-    // Event listeners (no usar onclick inline para evitar problemas)
+
+    // Event listeners
     const input = document.getElementById("mineiro-edit-input");
     const cancelBtn = document.getElementById("mineiro-cancel-btn");
     const saveBtn = document.getElementById("mineiro-save-btn");
-    
-    // Prevenir que el click en el input cierre el popup
+
+    // Update image preview on input
+    if (isImage) {
+      input.addEventListener("input", () => {
+        const preview = popup.querySelector(".mineiro-image-preview");
+        if (preview && input.value) {
+          preview.innerHTML = `<img src="${escapeHtml(input.value)}" alt="Preview" onerror="this.style.display='none'" />`;
+        }
+      });
+    }
+
     input.addEventListener("click", (e) => e.stopPropagation());
     input.addEventListener("mousedown", (e) => e.stopPropagation());
-    
+
     cancelBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       popup.remove();
@@ -925,101 +839,217 @@
         selectedElement = null;
       }
     });
-    
+
     saveBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      saveElement(elementId, type);
+      saveElementChange(el, parsed, isImage, isPrice);
     });
-    
-    // Enter para guardar (excepto en textarea)
-    if (!isTextarea) {
+
+    // Enter to save (except textarea)
+    if (!isLongText) {
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          saveElement(elementId, type);
+          saveElementChange(el, parsed, isImage, isPrice);
         }
       });
     }
-    
+
     input.focus();
+    input.select();
   };
 
-  const saveElement = async (elementId, type) => {
+  const saveElementChange = async (el, parsed, isImage, isPrice) => {
     const input = document.getElementById("mineiro-edit-input");
     const saveBtn = document.getElementById("mineiro-save-btn");
     if (!input) return;
 
     let value = input.value;
-    if (type === ElementTypes.PRICE) {
+    if (isPrice) {
       value = parseFloat(value) || 0;
     }
 
-    const siteId = getSiteId();
-    
-    // Mostrar estado de guardado
-    if (saveBtn) {
-      saveBtn.textContent = "⏳ Guardando...";
-      saveBtn.disabled = true;
-    }
-    
+    saveBtn.textContent = "⏳ Guardando...";
+    saveBtn.disabled = true;
+
     try {
-      // Primero intentar UPDATE
-      const { data: updateData, error: updateError } = await supabase
-        .from("elements")
-        .update({ current_value: value })
-        .eq("site_id", siteId)
-        .eq("element_id", elementId)
-        .select();
+      let success = false;
 
-      // Si no se actualizó ninguna fila, hacer INSERT
-      if (!updateError && (!updateData || updateData.length === 0)) {
-        const { error: insertError } = await supabase
-          .from("elements")
-          .upsert({
-            site_id: siteId,
-            element_id: elementId,
-            type: type,
-            current_value: value,
-            original_value: value,
-            name: selectedElement?.dataset.mineiroName || `Elemento ${elementId}`,
-          }, { onConflict: "site_id,element_id" });
-        
-        if (insertError) {
-          throw insertError;
+      switch (parsed.type) {
+        case "config":
+        case "hero":
+        case "footer":
+        case "testimonios-config": {
+          // Update tienda.site_config
+          const siteConfig = tiendaData?.site_config || {};
+          
+          if (parsed.type === "config") {
+            if (!siteConfig.config) siteConfig.config = {};
+            setNestedValue(siteConfig.config, parsed.field, value);
+          } else if (parsed.type === "hero") {
+            if (!siteConfig.hero) siteConfig.hero = {};
+            setNestedValue(siteConfig.hero, parsed.field, value);
+          } else if (parsed.type === "footer") {
+            if (!siteConfig.footer) siteConfig.footer = {};
+            setNestedValue(siteConfig.footer, parsed.field, value);
+          } else if (parsed.type === "testimonios-config") {
+            if (!siteConfig.testimonios_config) siteConfig.testimonios_config = {};
+            setNestedValue(siteConfig.testimonios_config, parsed.field, value);
+          }
+
+          const { error } = await supabase
+            .from("tiendas")
+            .update({ site_config: siteConfig })
+            .eq("id", tiendaData.id);
+
+          if (error) throw error;
+          
+          // Update local cache
+          tiendaData.site_config = siteConfig;
+          success = true;
+          break;
         }
-      } else if (updateError) {
-        throw updateError;
+
+        case "producto": {
+          const producto = productosCache.find(p => p.dom_id === parsed.identifier)
+                        || productosCache.find(p => String(p.id) === parsed.identifier);
+          
+          if (!producto) {
+            throw new Error("Producto no encontrado");
+          }
+
+          // Build update object
+          const updateData = {};
+          if (parsed.field.includes(".")) {
+            // Nested field (e.g., configuracion.variantes.0.precio)
+            const topField = parsed.field.split(".")[0];
+            const rest = parsed.field.split(".").slice(1).join(".");
+            const currentFieldValue = producto[topField] || {};
+            setNestedValue(currentFieldValue, rest, value);
+            updateData[topField] = currentFieldValue;
+          } else {
+            updateData[parsed.field] = value;
+          }
+
+          const { error } = await supabase
+            .from("productos")
+            .update(updateData)
+            .eq("id", producto.id);
+
+          if (error) throw error;
+
+          // Update local cache
+          Object.assign(producto, updateData);
+          success = true;
+          break;
+        }
+
+        case "testimonio": {
+          const testimonio = testimoniosCache.find(t => t.dom_id === parsed.domId);
+          
+          if (!testimonio) {
+            throw new Error("Testimonio no encontrado");
+          }
+
+          const updateData = { [parsed.field]: value };
+
+          const { error } = await supabase
+            .from("testimonios")
+            .update(updateData)
+            .eq("id", testimonio.id);
+
+          if (error) throw error;
+
+          // Update local cache
+          Object.assign(testimonio, updateData);
+          success = true;
+          break;
+        }
       }
 
-      // Aplicar localmente
-      if (selectedElement) {
-        hydrateElement(selectedElement, value, type, {});
-        selectedElement.classList.remove("mineiro-selected");
-      }
-      
-      selectedElement = null;
+      if (success) {
+        // Apply value to element immediately
+        applyValueToElement(el, value, parsed.field);
 
-      // Cerrar popup con feedback
-      const popup = document.querySelector(".mineiro-edit-popup");
-      if (popup) {
-        popup.innerHTML = `<div style="text-align:center;color:#4ade80;padding:20px">✓ Guardado</div>`;
-        setTimeout(() => popup.remove(), 800);
+        // Close popup with success feedback
+        const popup = document.querySelector(".mineiro-edit-popup");
+        if (popup) {
+          popup.innerHTML = `
+            <div style="text-align:center;padding:30px">
+              <div style="font-size:48px;margin-bottom:10px">✅</div>
+              <div style="color:#4ade80;font-size:16px;font-weight:600">¡Guardado!</div>
+              <div style="color:#94a3b8;font-size:13px;margin-top:5px">El cambio se refleja en tu página</div>
+            </div>
+          `;
+          setTimeout(() => popup.remove(), 1200);
+        }
+
+        if (selectedElement) {
+          selectedElement.classList.remove("mineiro-selected");
+          selectedElement = null;
+        }
+
+        log(`✓ Guardado: ${parsed.type}.${parsed.field} = ${value}`);
       }
-      
-      log(`Guardado: ${elementId} = ${value}`);
-      
+
     } catch (error) {
-      warn("Error saving:", error.message);
-      if (saveBtn) {
-        saveBtn.textContent = "❌ Error";
-        saveBtn.style.background = "#ef4444";
-        setTimeout(() => {
-          saveBtn.textContent = "💾 Guardar";
-          saveBtn.style.background = "";
-          saveBtn.disabled = false;
-        }, 2000);
-      }
+      warn("Error al guardar:", error.message);
+      
+      saveBtn.textContent = "❌ Error";
+      saveBtn.style.background = "#ef4444";
+      
+      setTimeout(() => {
+        saveBtn.textContent = "💾 Guardar";
+        saveBtn.style.background = "";
+        saveBtn.disabled = false;
+      }, 2000);
     }
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     IFRAME COMMUNICATION (for editor preview)
+     ───────────────────────────────────────────────────────────────────────── */
+
+  const setupIframeCommunication = () => {
+    window.addEventListener("message", async (event) => {
+      if (!event.data || !event.data.type) return;
+
+      switch (event.data.type) {
+        case "mineiro-update": {
+          // Find element and update it
+          const { elementId, value, binding } = event.data;
+          
+          // Try to find by element_id in our cache first
+          // Otherwise re-fetch and re-hydrate
+          log(`Recibido update desde iframe: ${binding || elementId} = ${value}`);
+          
+          // Re-run hydration to pick up changes
+          if (tiendaData) {
+            runHydration(tiendaData, productosCache, testimoniosCache);
+          }
+          break;
+        }
+
+        case "mineiro-rescan": {
+          // Re-fetch all data and re-hydrate
+          if (tiendaData) {
+            const [productos, testimonios] = await Promise.all([
+              fetchProductos(tiendaData.id),
+              fetchTestimonios(tiendaData.id).catch(() => []),
+            ]);
+            productosCache = productos;
+            testimoniosCache = testimonios;
+            runHydration(tiendaData, productos, testimonios);
+          }
+          break;
+        }
+
+        case "mineiro-enable-admin": {
+          enableAdminMode();
+          break;
+        }
+      }
+    });
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -1029,13 +1059,17 @@
   window.MineiroAdmin = {
     enable: enableAdminMode,
     disable: disableAdminMode,
-    saveElement,
     openDashboard: () => {
       const siteId = getSiteId();
-      window.open(`${DASHBOARD_URL}/editor/${siteId}`, "_blank");
+      window.open(`https://mineiro-clientes.vercel.app/dashboard`, "_blank");
     },
-    scan: scanPage,
+    refresh: () => {
+      if (tiendaData) {
+        runHydration(tiendaData, productosCache, testimoniosCache);
+      }
+    },
     getSiteId,
+    version: VERSION,
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -1043,84 +1077,82 @@
      ───────────────────────────────────────────────────────────────────────── */
 
   const init = async () => {
-    log(`Mineiro Engine v${VERSION} inicializando...`);
+    log(`Inicializando...`);
 
     try {
       await initSupabase();
       const siteId = getSiteId();
       log(`Site ID: ${siteId}`);
 
-      // 1. PRIMERO escanear página (asigna data-mineiro-id ESTABLES a elementos)
-      const elements = scanPage();
-      log(`Escaneados ${elements.length} elementos, asignados IDs estables`);
-
-      // 2. Cargar valores guardados de Supabase
-      const savedValues = await loadSavedValues(siteId);
-      log(`Cargados ${Object.keys(savedValues).length} valores editados de Supabase`);
-
-      // 3. Hidratar con valores guardados (AHORA los elementos ya tienen data-mineiro-id)
-      if (Object.keys(savedValues).length > 0) {
-        hydrateAll(savedValues);
+      // Fetch tienda
+      tiendaData = await fetchTienda(siteId);
+      if (!tiendaData) {
+        warn(`Tienda no encontrada para: ${siteId}`);
+        // Don't break the page, just log warning
+        return;
       }
 
-      // 4. Guardar mapa en Supabase (en background, SIN sobrescribir current_value)
-      saveSiteMap(siteId, elements).catch(e => warn("Error saving map:", e));
+      log("Tienda cargada:", tiendaData.nombre_negocio);
 
-      // 5. Suscribirse a cambios en tiempo real
-      subscribeToChanges(siteId);
+      // Check payment status
+      if (tiendaData.estado_pago === false && tiendaData.plan !== "trial") {
+        showSuspendedBanner();
+        return;
+      }
 
-      // 6. Si hay ?mineiro-admin en la URL, activar modo admin
+      // Fetch data in parallel
+      const [productos, testimonios] = await Promise.all([
+        fetchProductos(tiendaData.id),
+        fetchTestimonios(tiendaData.id).catch(() => []),
+      ]);
+
+      productosCache = productos;
+      testimoniosCache = testimonios;
+
+      log(`Cargados: ${productos.length} productos, ${testimonios.length} testimonios`);
+
+      // Hydrate elements
+      runHydration(tiendaData, productos, testimonios);
+
+      // Subscribe to realtime changes
+      subscribeToChanges(tiendaData.id);
+
+      // Setup iframe communication
+      setupIframeCommunication();
+
+      // Enable admin mode if URL param present
       if (window.location.search.includes("mineiro-admin") ||
           window.location.hash.includes("mineiro-admin")) {
-        enableAdminMode();
+        setTimeout(enableAdminMode, 500);
+      }
+
+      // In preview mode, enable admin by default
+      if (window.location.search.includes("mineiro-preview")) {
+        setTimeout(enableAdminMode, 500);
       }
 
       log("✓ Engine listo");
-      
-      // Mostrar indicador de estado (solo en desarrollo o con debug)
-      if (window.location.search.includes("mineiro-debug")) {
-        showDebugPanel(siteId, elements.length, Object.keys(savedValues).length);
-      }
 
     } catch (err) {
-      warn("Error de inicialización:", err);
+      warn("Error de inicialización:", err.message);
       console.error(err);
-      
-      // Mostrar error visual si hay problemas
-      showErrorBanner(err.message);
     }
   };
-  
-  const showDebugPanel = (siteId, scanned, saved) => {
-    const panel = document.createElement("div");
-    panel.id = "mineiro-debug";
-    panel.innerHTML = `
-      <div style="position:fixed;bottom:20px;right:20px;background:#1a1a2e;color:#fff;padding:15px;border-radius:8px;font-family:monospace;font-size:12px;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3)">
-        <div style="color:#f59e0b;font-weight:bold;margin-bottom:10px">🔧 Mineiro Debug v${VERSION}</div>
-        <div>Site ID: <span style="color:#4ade80">${siteId}</span></div>
-        <div>Elementos escaneados: <span style="color:#60a5fa">${scanned}</span></div>
-        <div>Valores guardados: <span style="color:#f472b6">${saved}</span></div>
-        <div style="margin-top:10px">
-          <button onclick="MineiroAdmin.enable()" style="background:#f59e0b;color:#000;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;margin-right:5px">Editar</button>
-          <button onclick="document.getElementById('mineiro-debug').remove()" style="background:#374151;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer">Cerrar</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(panel);
-  };
-  
-  const showErrorBanner = (message) => {
+
+  const showSuspendedBanner = () => {
+    if (document.getElementById("mineiro-suspended-banner")) return;
     const banner = document.createElement("div");
+    banner.id = "mineiro-suspended-banner";
     banner.innerHTML = `
-      <div style="position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;padding:10px 20px;font-family:sans-serif;font-size:14px;z-index:99999;text-align:center">
-        ⚠️ Mineiro Error: ${message}
-        <button onclick="this.parentElement.remove()" style="background:transparent;color:#fff;border:1px solid #fff;padding:2px 8px;margin-left:10px;cursor:pointer;border-radius:4px">×</button>
+      <div style="position:fixed;bottom:0;left:0;right:0;background:#0f172a;color:#f8fafc;padding:16px 20px;text-align:center;font-family:system-ui;border-top:2px solid #f59e0b;z-index:99999">
+        <strong>⚠️ Servicio Mineiro Suspendido</strong> - 
+        <a href="https://mineiro-clientes.vercel.app/pricing" style="color:#f59e0b;text-decoration:underline">Activa tu plan</a>
       </div>
     `;
     document.body.appendChild(banner);
   };
 
-  // Iniciar cuando el DOM esté listo
+  // Run on DOM ready
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {

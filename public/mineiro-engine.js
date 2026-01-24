@@ -1,4 +1,4 @@
-/* Mineiro Engine v3 - Full Site Editing Support */
+/* Mineiro Engine v3.5 - Full Site Editing Support with Unified Data */
 (function () {
   "use strict";
 
@@ -7,22 +7,23 @@
 
   const DEFAULT_SUPABASE_URL = "https://zzgyczbiufafthizurbv.supabase.co";
   const DEFAULT_SUPABASE_KEY =
-    "sb_publishable_1HENvCdV9vCRsBX36N2U8g_zqlAlFT9";
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp6Z3ljemJpdWZhZnRoaXp1cmJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc2NDUyNDksImV4cCI6MjA1MzIyMTI0OX0.SsJEBEVlvJPoHwrxNEKnAiF2mtv7Xa2OUBuhT0rGHiM";
 
   /* ─────────────────────────────────────────────────────────────────────────
      CONFIG & UTILITIES
      ───────────────────────────────────────────────────────────────────────── */
 
   const getConfig = () => {
-    const script = document.currentScript;
+    const script = document.currentScript || document.querySelector("script[data-store-slug]");
     const ds = script?.dataset ?? {};
     return {
       supabaseUrl: ds.supabaseUrl || window.MINEIRO_SUPABASE_URL || DEFAULT_SUPABASE_URL,
       supabaseKey: ds.supabaseKey || window.MINEIRO_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY,
       storeSlug:
         ds.storeSlug ||
+        ds.mineiroSite ||
         document.querySelector("[data-store-slug]")?.dataset.storeSlug ||
-        window.location.hostname,
+        window.location.hostname.replace(/\./g, "-"),
     };
   };
 
@@ -44,10 +45,11 @@
     return d.innerHTML;
   };
 
-  const log = (msg, ...args) => console.log(`[Mineiro] ${msg}`, ...args);
-  const warn = (msg, ...args) => console.warn(`[Mineiro] ${msg}`, ...args);
+  const log = (msg, ...args) => console.log(`[Mineiro Engine] ${msg}`, ...args);
+  const warn = (msg, ...args) => console.warn(`[Mineiro Engine] ${msg}`, ...args);
 
   const getNestedValue = (obj, path) => {
+    if (!obj || !path) return undefined;
     return path.split(".").reduce((acc, key) => {
       if (acc == null) return undefined;
       const idx = parseInt(key, 10);
@@ -87,13 +89,18 @@
   };
 
   const fetchTienda = async (slug) => {
+    const hostname = window.location.hostname;
+    
     const { data, error } = await supabase
       .from("tiendas")
       .select("*")
-      .or(`slug.eq.${slug},url_web.ilike.%${slug}%`)
+      .or(`slug.eq.${slug},url_web.ilike.%${hostname}%`)
       .limit(1)
       .maybeSingle();
-    if (error) throw error;
+    
+    if (error && error.code !== 'PGRST116') {
+      warn("Error fetching tienda:", error.message);
+    }
     return data;
   };
 
@@ -125,7 +132,7 @@
       .eq("tienda_id", tiendaId)
       .eq("visible", true)
       .order("orden", { ascending: true });
-    if (error && error.code !== "PGRST116") throw error; // Ignore "table not found"
+    if (error && error.code !== "PGRST116") throw error;
     return data ?? [];
   };
 
@@ -137,21 +144,12 @@
     if (document.getElementById("mineiro-suspended-banner")) return;
     const banner = document.createElement("div");
     banner.id = "mineiro-suspended-banner";
-    banner.textContent = "Servicio Mineiro Suspendido";
-    Object.assign(banner.style, {
-      position: "fixed",
-      left: 0,
-      right: 0,
-      bottom: 0,
-      zIndex: 9999,
-      background: "#0f172a",
-      color: "#f8fafc",
-      padding: "12px 16px",
-      textAlign: "center",
-      fontFamily: "inherit",
-      fontWeight: 600,
-      borderTop: "1px solid #1f2937",
-    });
+    banner.innerHTML = `
+      <div style="position:fixed;bottom:0;left:0;right:0;background:#0f172a;color:#f8fafc;padding:16px 20px;text-align:center;font-family:system-ui;border-top:2px solid #f59e0b;z-index:99999">
+        <strong>⚠️ Servicio Mineiro Suspendido</strong> - 
+        <a href="https://mineiro-clientes.vercel.app/pricing" style="color:#f59e0b;text-decoration:underline">Activa tu plan</a>
+      </div>
+    `;
     document.body.appendChild(banner);
   };
 
@@ -289,6 +287,8 @@
      ───────────────────────────────────────────────────────────────────────── */
 
   const parseBinding = (binding) => {
+    if (!binding) return null;
+
     // Config tienda: "config-tienda.nombre_tienda"
     if (binding.startsWith("config-tienda.")) {
       return { type: "config", field: binding.replace("config-tienda.", "") };
@@ -376,14 +376,14 @@
     }
 
     let value;
-    const siteConfig = tienda.site_config || {};
+    const siteConfig = tienda?.site_config || {};
 
     switch (parsed.type) {
       case "config": {
         // Try from site_config.config first, then tienda fields
         value = getNestedValue(siteConfig.config, parsed.field) 
              ?? getNestedValue(tienda, parsed.field)
-             ?? tienda[parsed.field === "nombre_tienda" ? "nombre_negocio" : parsed.field];
+             ?? tienda?.[parsed.field === "nombre_tienda" ? "nombre_negocio" : parsed.field];
         break;
       }
 
@@ -393,8 +393,19 @@
       }
 
       case "footer": {
-        value = getNestedValue(siteConfig.footer, parsed.field)
-             ?? (parsed.field === "nombre_tienda" ? tienda.nombre_negocio : undefined);
+        // Buscar en siteConfig.footer primero
+        value = getNestedValue(siteConfig.footer, parsed.field);
+        
+        // Si no existe, usar valores por defecto de la tienda
+        if (value === undefined) {
+          if (parsed.field === "nombre_tienda") {
+            value = tienda?.nombre_negocio;
+          } else if (parsed.field === "whatsapp") {
+            value = tienda?.whatsapp;
+          } else if (parsed.field === "email") {
+            value = tienda?.email;
+          }
+        }
         break;
       }
 
@@ -426,21 +437,21 @@
 
     if (value !== undefined && value !== null) {
       applyValueToElement(el, value, parsed.field);
-    } else {
-      // Keep original content as fallback
-      log(`No value found for binding: ${binding}`);
     }
   };
 
   const runHydrationMode = (tienda, productos, testimonios) => {
     const elements = document.querySelectorAll("[data-mineiro-bind]");
+    let hydrated = 0;
     elements.forEach((el) => {
       try {
         hydrateElement(el, tienda, productos, testimonios);
+        hydrated++;
       } catch (err) {
         warn(`Hydration error for element:`, el, err);
       }
     });
+    log(`Hidratados ${hydrated} elementos`);
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -515,24 +526,107 @@
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
+     REALTIME SUBSCRIPTIONS
+     ───────────────────────────────────────────────────────────────────────── */
+
+  const subscribeToChanges = (tiendaId) => {
+    // Subscribe to productos changes
+    supabase
+      .channel(`productos-engine-${tiendaId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "productos",
+          filter: `tienda_id=eq.${tiendaId}`,
+        },
+        (payload) => {
+          log("Producto actualizado en tiempo real");
+          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+            const producto = payload.new;
+            const idx = productosCache.findIndex(p => p.id === producto.id);
+            if (idx >= 0) {
+              productosCache[idx] = producto;
+            } else if (producto.visible) {
+              productosCache.push(producto);
+            }
+            // Re-hydrate all elements
+            runHydrationMode(tiendaData, productosCache, testimoniosCache);
+          }
+        }
+      )
+      .subscribe();
+
+    // Subscribe to tienda changes
+    supabase
+      .channel(`tienda-engine-${tiendaId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "tiendas",
+          filter: `id=eq.${tiendaId}`,
+        },
+        (payload) => {
+          log("Tienda actualizada en tiempo real");
+          tiendaData = payload.new;
+          runHydrationMode(tiendaData, productosCache, testimoniosCache);
+        }
+      )
+      .subscribe();
+
+    // Subscribe to testimonios changes
+    supabase
+      .channel(`testimonios-engine-${tiendaId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "testimonios",
+          filter: `tienda_id=eq.${tiendaId}`,
+        },
+        (payload) => {
+          log("Testimonio actualizado en tiempo real");
+          if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+            const testimonio = payload.new;
+            const idx = testimoniosCache.findIndex(t => t.id === testimonio.id);
+            if (idx >= 0) {
+              testimoniosCache[idx] = testimonio;
+            } else if (testimonio.visible) {
+              testimoniosCache.push(testimonio);
+            }
+            runHydrationMode(tiendaData, productosCache, testimoniosCache);
+          }
+        }
+      )
+      .subscribe();
+
+    log("Suscrito a cambios en tiempo real");
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
      MAIN INIT
      ───────────────────────────────────────────────────────────────────────── */
 
   const init = async () => {
     const config = getConfig();
+    log("Inicializando con slug:", config.storeSlug);
 
     try {
       await initSupabase(config);
-      log("Supabase initialized");
+      log("Supabase conectado");
 
       // Fetch tienda
       tiendaData = await fetchTienda(config.storeSlug);
       if (!tiendaData) {
-        warn(`Tienda not found for slug: ${config.storeSlug}`);
+        warn(`Tienda no encontrada para: ${config.storeSlug}`);
         return;
       }
 
-      log("Tienda loaded:", tiendaData.nombre_negocio);
+      log("Tienda cargada:", tiendaData.nombre_negocio);
 
       // Check payment status - allow trial period
       if (tiendaData.estado_pago === false && tiendaData.plan !== "trial") {
@@ -543,7 +637,7 @@
       // Fetch data in parallel
       const [productos, secciones, testimonios] = await Promise.all([
         fetchProductos(tiendaData.id),
-        fetchSecciones(tiendaData.id),
+        fetchSecciones(tiendaData.id).catch(() => []),
         fetchTestimonios(tiendaData.id).catch(() => []),
       ]);
 
@@ -551,7 +645,7 @@
       seccionesCache = secciones;
       testimoniosCache = testimonios;
 
-      log(`Loaded ${productos.length} products, ${secciones.length} sections, ${testimonios.length} testimonios`);
+      log(`Cargados: ${productos.length} productos, ${secciones.length} secciones, ${testimonios.length} testimonios`);
 
       // Run all binding modes
       runHydrationMode(tiendaData, productos, testimonios);
@@ -561,9 +655,12 @@
       // Attach variant listeners after all rendering
       attachVariantListeners();
 
-      log("Engine v3 ready ✓");
+      // Subscribe to realtime changes
+      subscribeToChanges(tiendaData.id);
+
+      log("✓ Engine listo");
     } catch (err) {
-      warn("Initialization failed (page remains intact):", err.message);
+      warn("Error de inicialización:", err.message);
       console.error(err);
     }
   };
