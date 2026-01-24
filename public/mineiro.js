@@ -1078,6 +1078,16 @@
 
   const init = async () => {
     log(`Inicializando...`);
+    
+    // PRIMERO: Si hay ?mineiro-admin en la URL, activar modo admin inmediatamente
+    const shouldEnableAdmin = window.location.search.includes("mineiro-admin") ||
+                              window.location.hash.includes("mineiro-admin") ||
+                              window.location.search.includes("mineiro-preview");
+    
+    if (shouldEnableAdmin) {
+      log("Modo admin detectado en URL, activando...");
+      setTimeout(enableAdminMode, 300);
+    }
 
     try {
       await initSupabase();
@@ -1086,50 +1096,33 @@
 
       // Fetch tienda
       tiendaData = await fetchTienda(siteId);
-      if (!tiendaData) {
+      
+      if (tiendaData) {
+        log("Tienda cargada:", tiendaData.nombre_negocio);
+
+        // Fetch data in parallel
+        const [productos, testimonios] = await Promise.all([
+          fetchProductos(tiendaData.id).catch(() => []),
+          fetchTestimonios(tiendaData.id).catch(() => []),
+        ]);
+
+        productosCache = productos;
+        testimoniosCache = testimonios;
+
+        log(`Cargados: ${productos.length} productos, ${testimonios.length} testimonios`);
+
+        // Hydrate elements
+        runHydration(tiendaData, productos, testimonios);
+
+        // Subscribe to realtime changes
+        subscribeToChanges(tiendaData.id);
+      } else {
         warn(`Tienda no encontrada para: ${siteId}`);
-        // Don't break the page, just log warning
-        return;
+        log("El modo admin funcionará pero sin datos de la tienda");
       }
-
-      log("Tienda cargada:", tiendaData.nombre_negocio);
-
-      // Check payment status
-      if (tiendaData.estado_pago === false && tiendaData.plan !== "trial") {
-        showSuspendedBanner();
-        return;
-      }
-
-      // Fetch data in parallel
-      const [productos, testimonios] = await Promise.all([
-        fetchProductos(tiendaData.id),
-        fetchTestimonios(tiendaData.id).catch(() => []),
-      ]);
-
-      productosCache = productos;
-      testimoniosCache = testimonios;
-
-      log(`Cargados: ${productos.length} productos, ${testimonios.length} testimonios`);
-
-      // Hydrate elements
-      runHydration(tiendaData, productos, testimonios);
-
-      // Subscribe to realtime changes
-      subscribeToChanges(tiendaData.id);
 
       // Setup iframe communication
       setupIframeCommunication();
-
-      // Enable admin mode if URL param present
-      if (window.location.search.includes("mineiro-admin") ||
-          window.location.hash.includes("mineiro-admin")) {
-        setTimeout(enableAdminMode, 500);
-      }
-
-      // In preview mode, enable admin by default
-      if (window.location.search.includes("mineiro-preview")) {
-        setTimeout(enableAdminMode, 500);
-      }
 
       log("✓ Engine listo");
 
