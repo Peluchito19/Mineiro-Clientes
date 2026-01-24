@@ -341,7 +341,7 @@
   };
 
   const runHydration = (tienda, productos, testimonios) => {
-    const elements = document.querySelectorAll("[data-mineiro-bind]");
+    const elements = document.querySelectorAll("[data-mineiro-bind]:not([data-mineiro-hydrated])");
     let hydrated = 0;
     elements.forEach((el) => {
       try {
@@ -351,7 +351,55 @@
         warn(`Hydration error:`, err);
       }
     });
-    log(`Hidratados ${hydrated} elementos`);
+    if (hydrated > 0) {
+      log(`Hidratados ${hydrated} elementos`);
+    }
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     MUTATION OBSERVER - Detecta elementos añadidos por React/Vue/etc
+     ───────────────────────────────────────────────────────────────────────── */
+
+  let mutationObserver = null;
+  let hydrationTimeout = null;
+
+  const setupMutationObserver = () => {
+    if (mutationObserver) return;
+
+    mutationObserver = new MutationObserver((mutations) => {
+      let hasNewBindings = false;
+      
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              if (node.hasAttribute?.('data-mineiro-bind') || 
+                  node.querySelector?.('[data-mineiro-bind]')) {
+                hasNewBindings = true;
+                break;
+              }
+            }
+          }
+        }
+        if (hasNewBindings) break;
+      }
+
+      if (hasNewBindings && tiendaData) {
+        // Debounce: esperar 100ms para que React termine de renderizar
+        clearTimeout(hydrationTimeout);
+        hydrationTimeout = setTimeout(() => {
+          log("Detectados nuevos elementos, re-hidratando...");
+          runHydration(tiendaData, productosCache, testimoniosCache);
+        }, 100);
+      }
+    });
+
+    mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    log("MutationObserver activo - detectando elementos de React/SPA");
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -1281,8 +1329,16 @@
           log("Testimonios:", testimonios.map(t => `${t.nombre} (id:${t.id}, dom_id:${t.dom_id || 'none'})`).join(", "));
         }
 
-        // Hydrate elements
+        // Hydrate elements (intento inicial)
         runHydration(tiendaData, productos, testimonios);
+
+        // Configurar MutationObserver para detectar elementos de React
+        setupMutationObserver();
+
+        // Reintentar hidratación después de que React termine (por si acaso)
+        setTimeout(() => runHydration(tiendaData, productos, testimonios), 500);
+        setTimeout(() => runHydration(tiendaData, productos, testimonios), 1500);
+        setTimeout(() => runHydration(tiendaData, productos, testimonios), 3000);
 
         // Subscribe to realtime changes
         subscribeToChanges(tiendaData.id);

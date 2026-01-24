@@ -452,7 +452,7 @@
   };
 
   const runHydrationMode = (tienda, productos, testimonios) => {
-    const elements = document.querySelectorAll("[data-mineiro-bind]");
+    const elements = document.querySelectorAll("[data-mineiro-bind]:not([data-mineiro-hydrated])");
     let hydrated = 0;
     elements.forEach((el) => {
       try {
@@ -462,7 +462,54 @@
         warn(`Hydration error for element:`, el, err);
       }
     });
-    log(`Hidratados ${hydrated} elementos`);
+    if (hydrated > 0) {
+      log(`Hidratados ${hydrated} elementos`);
+    }
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     MUTATION OBSERVER - Detecta elementos añadidos por React/Vue/etc
+     ───────────────────────────────────────────────────────────────────────── */
+
+  let mutationObserver = null;
+  let hydrationTimeout = null;
+
+  const setupMutationObserver = () => {
+    if (mutationObserver) return;
+
+    mutationObserver = new MutationObserver((mutations) => {
+      let hasNewBindings = false;
+      
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              if (node.hasAttribute?.('data-mineiro-bind') || 
+                  node.querySelector?.('[data-mineiro-bind]')) {
+                hasNewBindings = true;
+                break;
+              }
+            }
+          }
+        }
+        if (hasNewBindings) break;
+      }
+
+      if (hasNewBindings && tiendaData) {
+        clearTimeout(hydrationTimeout);
+        hydrationTimeout = setTimeout(() => {
+          log("Detectados nuevos elementos, re-hidratando...");
+          runHydrationMode(tiendaData, productosCache, testimoniosCache);
+        }, 100);
+      }
+    });
+
+    mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    log("MutationObserver activo - detectando elementos de React/SPA");
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -665,6 +712,14 @@
 
       // Attach variant listeners after all rendering
       attachVariantListeners();
+
+      // Configurar MutationObserver para detectar elementos de React
+      setupMutationObserver();
+
+      // Reintentar hidratación para SPAs (React, Vue, etc)
+      setTimeout(() => runHydrationMode(tiendaData, productos, testimonios), 500);
+      setTimeout(() => runHydrationMode(tiendaData, productos, testimonios), 1500);
+      setTimeout(() => runHydrationMode(tiendaData, productos, testimonios), 3000);
 
       // Subscribe to realtime changes
       subscribeToChanges(tiendaData.id);
