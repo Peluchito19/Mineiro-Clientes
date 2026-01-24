@@ -1027,6 +1027,9 @@
         }
 
         case "producto": {
+          log(`Buscando producto con identifier: "${parsed.identifier}"`);
+          log(`Productos en cache: ${productosCache.length}`);
+          
           // Buscar producto por múltiples métodos
           let producto = productosCache.find(p => p.dom_id === parsed.identifier)
                       || productosCache.find(p => String(p.id) === parsed.identifier);
@@ -1162,6 +1165,8 @@
 
       // Llamar a la API
       if (apiPayload) {
+        log("Enviando a API:", JSON.stringify(apiPayload, null, 2));
+        
         const response = await fetch(API_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1169,9 +1174,10 @@
         });
 
         const result = await response.json();
+        log("Respuesta API:", result);
         
         if (!response.ok || result.error) {
-          throw new Error(result.error || "Error al guardar");
+          throw new Error(result.error || `Error HTTP ${response.status}`);
         }
         
         success = true;
