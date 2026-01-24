@@ -287,6 +287,9 @@
 
   // Mapa global para guardar el HTML original ANTES de cualquier hidratación
   const htmlOriginalDelCodigo = new Map();
+  
+  // Set de elementos que el usuario restauró a original y no deben re-hidratarse
+  const preservedOriginalElements = new Set();
 
   // Función para capturar el HTML original de todos los elementos ANTES de hidratar
   const captureOriginalHTML = () => {
@@ -332,7 +335,12 @@
       const stars = parseInt(value, 10) || 0;
       el.textContent = "★".repeat(stars) + "☆".repeat(Math.max(0, 5 - stars));
     } else {
-      el.textContent = value;
+      // Si el valor contiene HTML (tags), usar innerHTML para preservar formato
+      if (typeof value === 'string' && (value.includes('<') && value.includes('>'))) {
+        el.innerHTML = value;
+      } else {
+        el.textContent = value;
+      }
     }
 
     el.dataset.mineiroHydrated = "true";
@@ -340,6 +348,12 @@
   };
 
   const hydrateElement = (el, tienda, productos, testimonios) => {
+    // No hidratar elementos que el usuario preservó como originales
+    if (preservedOriginalElements.has(el) || el.dataset.mineiroPreserved === 'true') {
+      log(`Elemento preservado, saltando hidratación: ${el.dataset.mineiroBind}`);
+      return;
+    }
+    
     const binding = el.dataset.mineiroBind;
     const parsed = parseBinding(binding);
 
@@ -751,10 +765,11 @@
       el.href = original.href;
     }
     
-    // Quitar marca de hidratado para que pueda volver a hidratarse si es necesario
-    delete el.dataset.mineiroHydrated;
+    // Marcar como elemento preservado para que NO se vuelva a hidratar
+    preservedOriginalElements.add(el);
+    el.dataset.mineiroPreserved = 'true';
     
-    log("✓ Restaurado al HTML original del código");
+    log("✓ Restaurado al HTML original del código (protegido de re-hidratación)");
     return true;
   };
 
@@ -2279,24 +2294,39 @@
     let value = richHTML || (richEditor ? richEditor.innerHTML : input?.value);
     let plainTextValue = richEditor ? richEditor.textContent : input?.value;
     
+    // Determinar si hay formato HTML (estilos individuales como <b>, <i>, etc.)
+    const hasHTMLFormatting = richEditor && value !== plainTextValue && (
+      value.includes('<b>') || value.includes('<strong>') ||
+      value.includes('<i>') || value.includes('<em>') ||
+      value.includes('<u>') || value.includes('<s>') ||
+      value.includes('<span') || value.includes('<font')
+    );
+    
+    // Para guardar en BD: usar HTML si tiene formato, texto plano si no
+    let valueForAPI = hasHTMLFormatting ? value : plainTextValue;
+    
     if (isPrice) {
       value = parseFloat(plainTextValue) || 0;
+      valueForAPI = value;
       plainTextValue = value;
     }
 
-    // Guardar valor original para historial
-    const originalValue = originalValues.get(el);
+    // Guardar valor original para historial (usar el valor actual del elemento)
     const oldValue = isImage 
       ? (el.tagName.toLowerCase() === "img" ? el.src : el.style.backgroundImage)
       : el.innerHTML || el.textContent?.trim();
     const oldTextContent = el.textContent?.trim();
+    
+    // Si el usuario guarda, quitar de elementos preservados para permitir futuras hidrataciones
+    preservedOriginalElements.delete(el);
+    delete el.dataset.mineiroPreserved;
 
     saveBtn.innerHTML = `<div class="mineiro-spinner"></div> Guardando...`;
     saveBtn.disabled = true;
 
     try {
-      // Guardar texto plano a la API (sin HTML)
-      await saveToAPI(parsed, plainTextValue, el);
+      // Guardar a la API (con HTML si tiene formato, texto plano si no)
+      await saveToAPI(parsed, valueForAPI, el);
 
       // Aplicar valor al elemento
       if (richHTML || richEditor) {
