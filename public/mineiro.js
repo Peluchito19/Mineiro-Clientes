@@ -747,23 +747,40 @@
 
     isLongText = !isImage && !isPrice && currentValue.length > 50;
 
-    // Position popup
+    // Position popup - SIEMPRE cerca del elemento
     const rect = el.getBoundingClientRect();
     const popup = document.createElement("div");
     popup.className = "mineiro-edit-popup";
     
-    let top = rect.bottom + 15 + window.scrollY;
-    let left = rect.left + window.scrollX;
+    // Calcular posición centrada horizontalmente respecto al elemento
+    let left = rect.left + (rect.width / 2) - 175; // 175 = mitad del ancho del popup (350/2)
+    let top = rect.bottom + 10; // 10px debajo del elemento
     
+    // Ajustar si se sale por la derecha
     if (left + 350 > window.innerWidth) {
-      left = window.innerWidth - 370;
+      left = window.innerWidth - 360;
     }
-    if (top + 250 > window.innerHeight + window.scrollY) {
-      top = rect.top - 260 + window.scrollY;
+    // Ajustar si se sale por la izquierda
+    if (left < 10) {
+      left = 10;
     }
     
-    popup.style.top = `${Math.max(70, top)}px`;
-    popup.style.left = `${Math.max(10, left)}px`;
+    // Si no cabe abajo, ponerlo arriba del elemento
+    const popupHeight = 280; // altura aproximada
+    if (top + popupHeight > window.innerHeight) {
+      top = rect.top - popupHeight - 10;
+    }
+    
+    // Si tampoco cabe arriba, ponerlo en el centro de la pantalla
+    if (top < 70) {
+      top = Math.max(70, (window.innerHeight - popupHeight) / 2);
+      left = Math.max(10, (window.innerWidth - 350) / 2);
+    }
+    
+    popup.style.position = "fixed"; // Usar fixed en lugar de absolute
+    popup.style.top = `${top}px`;
+    popup.style.left = `${left}px`;
+    popup.style.zIndex = "9999999";
 
     // Type label for UI
     const typeLabels = {
@@ -859,6 +876,9 @@
     input.select();
   };
 
+  // URL de la API para guardar cambios
+  const API_URL = "https://mineiro-clientes.vercel.app/api/edit";
+
   const saveElementChange = async (el, parsed, isImage, isPrice) => {
     const input = document.getElementById("mineiro-edit-input");
     const saveBtn = document.getElementById("mineiro-save-btn");
@@ -874,6 +894,7 @@
 
     try {
       let success = false;
+      let apiPayload = null;
 
       switch (parsed.type) {
         case "config":
@@ -881,7 +902,7 @@
         case "footer":
         case "testimonios-config": {
           // Update tienda.site_config
-          const siteConfig = tiendaData?.site_config || {};
+          const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
           
           if (parsed.type === "config") {
             if (!siteConfig.config) siteConfig.config = {};
@@ -897,16 +918,15 @@
             setNestedValue(siteConfig.testimonios_config, parsed.field, value);
           }
 
-          const { error } = await supabase
-            .from("tiendas")
-            .update({ site_config: siteConfig })
-            .eq("id", tiendaData.id);
-
-          if (error) throw error;
+          apiPayload = {
+            action: "update",
+            table: "tiendas",
+            data: { site_config: siteConfig },
+            where: { id: tiendaData.id }
+          };
           
           // Update local cache
           tiendaData.site_config = siteConfig;
-          success = true;
           break;
         }
 
@@ -921,26 +941,24 @@
           // Build update object
           const updateData = {};
           if (parsed.field.includes(".")) {
-            // Nested field (e.g., configuracion.variantes.0.precio)
             const topField = parsed.field.split(".")[0];
             const rest = parsed.field.split(".").slice(1).join(".");
-            const currentFieldValue = producto[topField] || {};
+            const currentFieldValue = JSON.parse(JSON.stringify(producto[topField] || {}));
             setNestedValue(currentFieldValue, rest, value);
             updateData[topField] = currentFieldValue;
           } else {
             updateData[parsed.field] = value;
           }
 
-          const { error } = await supabase
-            .from("productos")
-            .update(updateData)
-            .eq("id", producto.id);
-
-          if (error) throw error;
+          apiPayload = {
+            action: "update",
+            table: "productos",
+            data: updateData,
+            where: { id: producto.id }
+          };
 
           // Update local cache
           Object.assign(producto, updateData);
-          success = true;
           break;
         }
 
@@ -951,20 +969,34 @@
             throw new Error("Testimonio no encontrado");
           }
 
-          const updateData = { [parsed.field]: value };
-
-          const { error } = await supabase
-            .from("testimonios")
-            .update(updateData)
-            .eq("id", testimonio.id);
-
-          if (error) throw error;
+          apiPayload = {
+            action: "update",
+            table: "testimonios",
+            data: { [parsed.field]: value },
+            where: { id: testimonio.id }
+          };
 
           // Update local cache
-          Object.assign(testimonio, updateData);
-          success = true;
+          Object.assign(testimonio, { [parsed.field]: value });
           break;
         }
+      }
+
+      // Llamar a la API
+      if (apiPayload) {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(apiPayload)
+        });
+
+        const result = await response.json();
+        
+        if (!response.ok || result.error) {
+          throw new Error(result.error || "Error al guardar");
+        }
+        
+        success = true;
       }
 
       if (success) {
