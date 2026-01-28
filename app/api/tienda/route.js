@@ -128,7 +128,24 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { slug, nombre, url_web, site_config } = body;
+    const { slug, nombre, url_web, site_config, allowAutoCreate } = body;
+
+    const origin = request.headers.get("origin") || "";
+    const referer = request.headers.get("referer") || "";
+    const isAllowedOrigin =
+      origin.includes("mineiro-clientes.vercel.app") ||
+      referer.includes("mineiro-clientes.vercel.app") ||
+      origin.includes("localhost") ||
+      origin.includes("127.0.0.1") ||
+      referer.includes("localhost") ||
+      referer.includes("127.0.0.1");
+
+    if (allowAutoCreate !== true || !isAllowedOrigin) {
+      return NextResponse.json(
+        { error: "Creación automática no permitida" },
+        { status: 403, headers: corsHeaders }
+      );
+    }
 
     if (!slug) {
       return NextResponse.json({ error: "Se requiere slug" }, { status: 400, headers: corsHeaders });

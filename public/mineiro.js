@@ -195,7 +195,8 @@
           body: JSON.stringify({
             slug: slug,
             nombre: slug.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
-            url_web: window.location.origin
+            url_web: window.location.origin,
+            allowAutoCreate: true
           })
         });
         
