@@ -477,8 +477,6 @@ export default function DashboardClient({
     );
   }
 
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-12">

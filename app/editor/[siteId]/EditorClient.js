@@ -757,6 +757,7 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
               <MessageSquare size={16} />
               <span className="hidden sm:inline">Testimonios</span>
             </button>
+          </div>
 
           {/* Tab Content */}
           <div className="flex-1 overflow-y-auto p-4">
