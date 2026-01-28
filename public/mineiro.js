@@ -903,6 +903,8 @@
     // Usar categorías del menú (site_config.menu.categorias)
     const menuCategorias = tiendaData?.site_config?.menu?.categorias || {};
     const configCategorias = tiendaData?.site_config?.categorias || [];
+    const menuItems = tiendaData?.site_config?.menu?.items || [];
+    const menuSections = tiendaData?.site_config?.menu?.secciones || [];
     
     // Extraer categorías del menú como lista de objetos con slug y título
     const existingCategories = [];
@@ -929,6 +931,20 @@
         existingCategories.push({ slug, titulo });
         log(`Categoría encontrada: ${slug} -> ${titulo}`);
       }
+    };
+
+    const extractFromBindings = () => {
+      const bindings = Array.from(document.querySelectorAll('[data-mineiro-bind^="menu.categorias."]'))
+        .map((el) => el.getAttribute('data-mineiro-bind'))
+        .filter(Boolean);
+
+      bindings.forEach((binding) => {
+        const match = binding.match(/^menu\.categorias\.([^\.]+)\./);
+        if (match) {
+          const slug = match[1];
+          addCategory(slug, slug);
+        }
+      });
     };
 
     if (Array.isArray(menuCategorias)) {
@@ -965,6 +981,24 @@
       });
     }
 
+    if (Array.isArray(menuItems)) {
+      menuItems.forEach((item) => {
+        if (!item) return;
+        const slug = item.slug || item.id || item.key || item.nombre || item.title || item.titulo || '';
+        const titulo = item.titulo || item.nombre || item.label || item.title || '';
+        addCategory(slug, titulo);
+      });
+    }
+
+    if (Array.isArray(menuSections)) {
+      menuSections.forEach((section) => {
+        if (!section) return;
+        const slug = section.slug || section.id || section.key || section.nombre || section.title || section.titulo || '';
+        const titulo = section.titulo || section.nombre || section.label || section.title || '';
+        addCategory(slug, titulo);
+      });
+    }
+
     if (Array.isArray(configCategorias)) {
       configCategorias.forEach((cat) => {
         if (!cat) return;
@@ -978,6 +1012,9 @@
         addCategory(slug, titulo);
       });
     }
+
+    // Extraer categorías desde bindings en el DOM (fallback final)
+    extractFromBindings();
 
     // También buscar categorías en productos existentes como fallback
     const productCategories = [...new Set(productosCache.map(p => p.categoria).filter(Boolean))];

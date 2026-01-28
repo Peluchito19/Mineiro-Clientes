@@ -44,6 +44,22 @@ export default function DashboardClient({
   
   // Loading states for better UX
   const [isDeleting, setIsDeleting] = useState(null);
+  const [isClearingChanges, setIsClearingChanges] = useState(false);
+
+  const callEditApi = async ({ action, table, data, where }) => {
+    const response = await fetch("/api/edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, table, data, where }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.error) {
+      throw new Error(payload.error || "Error en API de edición");
+    }
+
+    return payload;
+  };
 
   // Update form when selected tienda changes
   useEffect(() => {
@@ -216,38 +232,34 @@ export default function DashboardClient({
     setIsDeleting(tiendaId);
 
     try {
-      // First delete all testimonios of this store
-      await supabase
-        .from("testimonios")
-        .delete()
-        .eq("tienda_id", tiendaId);
+      const tiendaToDelete = tiendas.find((t) => t.id === tiendaId);
 
-      // Then delete all products of this store
-      await supabase
-        .from("productos")
-        .delete()
-        .eq("tienda_id", tiendaId);
+      // Borrado definitivo vía API (service_role) para evitar RLS/caché
+      await callEditApi({
+        action: "delete",
+        table: "testimonios",
+        where: { tienda_id: tiendaId },
+      });
 
-      // Delete all elements linked to this store
-      const tiendaToDelete = tiendas.find(t => t.id === tiendaId);
+      await callEditApi({
+        action: "delete",
+        table: "productos",
+        where: { tienda_id: tiendaId },
+      });
+
       if (tiendaToDelete?.slug) {
-        await supabase
-          .from("elements")
-          .delete()
-          .eq("site_id", tiendaToDelete.slug);
+        await callEditApi({
+          action: "delete",
+          table: "elements",
+          where: { site_id: tiendaToDelete.slug },
+        });
       }
 
-      // Finally delete the store
-      const { error } = await supabase
-        .from("tiendas")
-        .delete()
-        .eq("id", tiendaId);
-
-      if (error) {
-        alert("No se pudo eliminar la tienda: " + error.message);
-        setIsDeleting(null);
-        return;
-      }
+      await callEditApi({
+        action: "delete",
+        table: "tiendas",
+        where: { id: tiendaId },
+      });
 
       // Track deletion locally to prevent re-appearance on refresh
       setDeletedTiendaIds((prev) => new Set([...prev, tiendaId]));
@@ -271,6 +283,30 @@ export default function DashboardClient({
       alert("Error al eliminar: " + err.message);
     } finally {
       setIsDeleting(null);
+    }
+  };
+
+  const handleClearChanges = async () => {
+    if (!selectedTienda?.slug) return;
+
+    const confirmed = confirm(
+      "¿Eliminar el historial de cambios de esta tienda? Esta acción no se puede deshacer."
+    );
+    if (!confirmed) return;
+
+    setIsClearingChanges(true);
+    try {
+      await callEditApi({
+        action: "delete",
+        table: "elements",
+        where: { site_id: selectedTienda.slug },
+      });
+
+      setRecentChanges((prev) => prev.filter((c) => c.site_id !== selectedTienda.slug));
+    } catch (err) {
+      alert("No se pudo limpiar el historial: " + err.message);
+    } finally {
+      setIsClearingChanges(false);
     }
   };
 
@@ -854,25 +890,34 @@ export default function DashboardClient({
                 <span className="text-lg">🕒</span>
                 <h3 className="text-lg font-semibold text-white">Últimos cambios</h3>
               </div>
-              <button
-                onClick={async () => {
-                  if (!supabase || !selectedTienda?.slug) return;
-                  const { data: changes } = await supabase
-                    .from("elements")
-                    .select("id, site_id, element_id, type, name, original_value, current_value, updated_at")
-                    .eq("site_id", selectedTienda.slug)
-                    .not("current_value", "is", null)
-                    .order("updated_at", { ascending: false })
-                    .limit(20);
-                  setRecentChanges((prev) => {
-                    const otherChanges = prev.filter(c => c.site_id !== selectedTienda.slug);
-                    return [...(changes ?? []), ...otherChanges];
-                  });
-                }}
-                className="text-xs text-cyan-400 hover:text-cyan-300 transition"
-              >
-                🔄 Actualizar
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={async () => {
+                    if (!supabase || !selectedTienda?.slug) return;
+                    const { data: changes } = await supabase
+                      .from("elements")
+                      .select("id, site_id, element_id, type, name, original_value, current_value, updated_at")
+                      .eq("site_id", selectedTienda.slug)
+                      .not("current_value", "is", null)
+                      .order("updated_at", { ascending: false })
+                      .limit(20);
+                    setRecentChanges((prev) => {
+                      const otherChanges = prev.filter(c => c.site_id !== selectedTienda.slug);
+                      return [...(changes ?? []), ...otherChanges];
+                    });
+                  }}
+                  className="text-xs text-cyan-400 hover:text-cyan-300 transition"
+                >
+                  🔄 Actualizar
+                </button>
+                <button
+                  onClick={handleClearChanges}
+                  disabled={isClearingChanges}
+                  className="text-xs text-rose-400 hover:text-rose-300 transition disabled:opacity-60"
+                >
+                  {isClearingChanges ? "🧹 Limpiando..." : "🧹 Limpiar"}
+                </button>
+              </div>
             </div>
             
             {(() => {

@@ -80,6 +80,22 @@ export async function POST(request) {
       }
       
       result = upserted && upserted.length > 0 ? upserted[0] : null;
+    } else if (action === "delete") {
+      let query = supabaseAdmin.from(table).delete();
+
+      const whereEntries = Object.entries(where);
+      for (const [key, value] of whereEntries) {
+        query = query.eq(key, value);
+      }
+
+      const { data: deleted, error } = await query.select();
+
+      if (error) {
+        console.error("Delete error:", error);
+        return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
+      }
+
+      result = deleted ?? [];
     } else {
       return NextResponse.json({ error: "Acción no válida" }, { status: 400, headers: corsHeaders });
     }
