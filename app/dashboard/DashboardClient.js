@@ -32,7 +32,8 @@ export default function DashboardClient({
   const [tiendaStatus, setTiendaStatus] = useState("");
   const [creatingTienda, setCreatingTienda] = useState(false);
 
-  // Perfil de usuario
+  // Perfil de usuario - ahora en panel separado
+  const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [profileEmail, setProfileEmail] = useState(userEmail ?? "");
   const [emailStatus, setEmailStatus] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -40,6 +41,9 @@ export default function DashboardClient({
   const [passwordStatus, setPasswordStatus] = useState("");
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [deletedTiendaIds, setDeletedTiendaIds] = useState(new Set()); // Track deleted stores locally
+  
+  // Loading states for better UX
+  const [isDeleting, setIsDeleting] = useState(null);
 
   // Update form when selected tienda changes
   useEffect(() => {
@@ -209,35 +213,64 @@ export default function DashboardClient({
     if (!supabase) return;
     if (!confirm("¿Eliminar esta tienda y todos sus productos? Esta acción no se puede deshacer.")) return;
 
-    // First delete all products of this store
-    await supabase
-      .from("productos")
-      .delete()
-      .eq("tienda_id", tiendaId);
+    setIsDeleting(tiendaId);
 
-    // Then delete the store
-    const { error } = await supabase
-      .from("tiendas")
-      .delete()
-      .eq("id", tiendaId);
+    try {
+      // First delete all testimonios of this store
+      await supabase
+        .from("testimonios")
+        .delete()
+        .eq("tienda_id", tiendaId);
 
-    if (error) {
-      alert("No se pudo eliminar la tienda: " + error.message);
-      return;
-    }
+      // Then delete all products of this store
+      await supabase
+        .from("productos")
+        .delete()
+        .eq("tienda_id", tiendaId);
 
-    // Track deletion locally to prevent re-appearance on refresh
-    setDeletedTiendaIds((prev) => new Set([...prev, tiendaId]));
-
-    // Update local state
-    const remaining = tiendas.filter((t) => t.id !== tiendaId);
-    setTiendas(remaining);
-    
-    if (selectedTienda?.id === tiendaId) {
-      setSelectedTienda(remaining[0] || null);
-      if (remaining.length === 0) {
-        setShowOnboarding(true);
+      // Delete all elements linked to this store
+      const tiendaToDelete = tiendas.find(t => t.id === tiendaId);
+      if (tiendaToDelete?.slug) {
+        await supabase
+          .from("elements")
+          .delete()
+          .eq("site_id", tiendaToDelete.slug);
       }
+
+      // Finally delete the store
+      const { error } = await supabase
+        .from("tiendas")
+        .delete()
+        .eq("id", tiendaId);
+
+      if (error) {
+        alert("No se pudo eliminar la tienda: " + error.message);
+        setIsDeleting(null);
+        return;
+      }
+
+      // Track deletion locally to prevent re-appearance on refresh
+      setDeletedTiendaIds((prev) => new Set([...prev, tiendaId]));
+
+      // Update local state immediately and refresh from server
+      const remaining = tiendas.filter((t) => t.id !== tiendaId);
+      setTiendas(remaining);
+      
+      if (selectedTienda?.id === tiendaId) {
+        setSelectedTienda(remaining[0] || null);
+        if (remaining.length === 0) {
+          setShowOnboarding(true);
+        }
+      }
+
+      // Force refresh the page to ensure sync with server
+      router.refresh();
+      
+    } catch (err) {
+      console.error("Error deleting tienda:", err);
+      alert("Error al eliminar: " + err.message);
+    } finally {
+      setIsDeleting(null);
     }
   };
 
@@ -516,13 +549,18 @@ export default function DashboardClient({
                     <button
                       onClick={() => {
                         setShowProfileMenu(false);
-                        // Scroll to profile section
-                        document.getElementById("profile-section")?.scrollIntoView({ behavior: "smooth" });
+                        setShowProfilePanel(true);
                       }}
                       className="w-full text-left px-4 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800/50 transition"
                     >
                       ⚙️ Editar perfil
                     </button>
+                    <a
+                      href="/pricing"
+                      className="block w-full text-left px-4 py-2 rounded-lg text-sm text-amber-400 hover:bg-amber-500/10 transition"
+                    >
+                      💳 Suscripción
+                    </a>
                     <button
                       onClick={() => {
                         setShowProfileMenu(false);
@@ -539,71 +577,89 @@ export default function DashboardClient({
           </div>
         </header>
 
-        {/* Perfil de Usuario */}
-        <section id="profile-section" className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
-          <div className="flex flex-col gap-2 mb-6">
-            <h2 className="text-xl font-semibold text-white">Perfil y Acceso</h2>
-            <p className="text-sm text-slate-300">
-              Administra tu email y contraseña desde el panel.
-            </p>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="space-y-3">
-              <label className="text-sm font-medium text-slate-200">
-                Email de la cuenta
-              </label>
-              <input
-                value={profileEmail}
-                onChange={(e) => setProfileEmail(e.target.value)}
-                placeholder="tu@email.com"
-                className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
-              />
+        {/* Profile Panel Modal */}
+        {showProfilePanel && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="relative w-full max-w-lg rounded-2xl border border-slate-800/60 bg-slate-900/95 p-8 shadow-2xl">
               <button
-                type="button"
-                onClick={handleChangeEmail}
-                className="w-full rounded-xl border border-cyan-500/40 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/10"
+                onClick={() => setShowProfilePanel(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-white text-xl"
               >
-                📧 Cambiar Email
+                ✕
               </button>
-              {emailStatus && (
-                <p className="text-xs text-slate-400">{emailStatus}</p>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              <label className="text-sm font-medium text-slate-200">
-                Nueva contraseña
-              </label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Nueva contraseña"
-                className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
-              />
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirmar contraseña"
-                className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
-              />
-              <div className="grid grid-cols-1 gap-2">
-                <button
-                  type="button"
-                  onClick={handleChangePassword}
-                  className="w-full rounded-xl border border-violet-500/40 px-4 py-3 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/10"
-                >
-                  🔑 Cambiar Contraseña
-                </button>
+              
+              <div className="flex flex-col gap-2 mb-6">
+                <h2 className="text-xl font-semibold text-white">⚙️ Perfil y Acceso</h2>
+                <p className="text-sm text-slate-300">
+                  Administra tu email y contraseña
+                </p>
               </div>
-              {passwordStatus && (
-                <p className="text-xs text-slate-400">{passwordStatus}</p>
-              )}
+
+              <div className="space-y-6">
+                {/* Email Section */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-slate-200">
+                    Email de la cuenta
+                  </label>
+                  <input
+                    value={profileEmail}
+                    onChange={(e) => setProfileEmail(e.target.value)}
+                    placeholder="tu@email.com"
+                    className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleChangeEmail}
+                    className="w-full rounded-xl border border-cyan-500/40 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/10"
+                  >
+                    📧 Cambiar Email
+                  </button>
+                  {emailStatus && (
+                    <p className="text-xs text-slate-400">{emailStatus}</p>
+                  )}
+                </div>
+
+                {/* Password Section */}
+                <div className="space-y-3 border-t border-slate-700/50 pt-6">
+                  <label className="text-sm font-medium text-slate-200">
+                    Nueva contraseña
+                  </label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Nueva contraseña"
+                    className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
+                  />
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirmar contraseña"
+                    className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleChangePassword}
+                    className="w-full rounded-xl border border-violet-500/40 px-4 py-3 text-sm font-semibold text-violet-200 transition hover:bg-violet-500/10"
+                  >
+                    🔑 Cambiar Contraseña
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetPassword}
+                    className="w-full text-center text-sm text-slate-400 hover:text-cyan-400 transition"
+                  >
+                    ¿Olvidaste tu contraseña? Recuperar por email
+                  </button>
+                  {passwordStatus && (
+                    <p className="text-xs text-slate-400">{passwordStatus}</p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </section>
+        )}
 
         {/* Store Selector */}
         <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-6">
@@ -649,10 +705,15 @@ export default function DashboardClient({
                       e.stopPropagation();
                       handleDeleteTienda(tienda.id);
                     }}
-                    className="ml-2 text-slate-500 hover:text-rose-400 transition"
+                    disabled={isDeleting === tienda.id}
+                    className="ml-2 text-slate-500 hover:text-rose-400 transition disabled:opacity-50"
                     title="Eliminar tienda"
                   >
-                    ✕
+                    {isDeleting === tienda.id ? (
+                      <span className="inline-block w-4 h-4 border-2 border-rose-400 border-t-transparent rounded-full animate-spin"></span>
+                    ) : (
+                      "✕"
+                    )}
                   </button>
                 </div>
               ))}
@@ -788,9 +849,30 @@ export default function DashboardClient({
         {/* Últimos cambios del editor */}
         {selectedTienda && (
           <section className="rounded-2xl border border-slate-800/60 bg-slate-900/40 p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-lg">🕒</span>
-              <h3 className="text-lg font-semibold text-white">Últimos cambios</h3>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🕒</span>
+                <h3 className="text-lg font-semibold text-white">Últimos cambios</h3>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!supabase || !selectedTienda?.slug) return;
+                  const { data: changes } = await supabase
+                    .from("elements")
+                    .select("id, site_id, element_id, type, name, original_value, current_value, updated_at")
+                    .eq("site_id", selectedTienda.slug)
+                    .not("current_value", "is", null)
+                    .order("updated_at", { ascending: false })
+                    .limit(20);
+                  setRecentChanges((prev) => {
+                    const otherChanges = prev.filter(c => c.site_id !== selectedTienda.slug);
+                    return [...(changes ?? []), ...otherChanges];
+                  });
+                }}
+                className="text-xs text-cyan-400 hover:text-cyan-300 transition"
+              >
+                🔄 Actualizar
+              </button>
             </div>
             
             {(() => {
@@ -801,7 +883,7 @@ export default function DashboardClient({
               if (tiendaChanges.length === 0) {
                 return (
                   <div className="rounded-xl border border-slate-800/60 bg-slate-950/60 px-4 py-4 text-sm text-slate-400">
-                    Aún no hay cambios registrados. Los cambios aparecerán aquí cuando edites tu sitio.
+                    Aún no hay cambios registrados para <strong>{selectedTienda.nombre_negocio}</strong>. Los cambios aparecerán aquí cuando edites tu sitio con el editor visual.
                   </div>
                 );
               }

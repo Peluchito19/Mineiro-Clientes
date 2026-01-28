@@ -159,6 +159,28 @@ export default function PricingClient({ userId, userEmail, tienda, hasUnlimitedA
           </div>
         )}
 
+        {/* Already activated - show confirmation */}
+        {hasUnlimitedAccess && isPaid && (
+          <div className="rounded-2xl border-2 border-emerald-500/50 bg-gradient-to-r from-emerald-500/10 to-green-500/10 p-6">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">✅</span>
+                  <h2 className="text-xl font-semibold text-white">
+                    ¡Plan activado!
+                  </h2>
+                </div>
+                <p className="text-sm text-slate-300">
+                  Tu cuenta <strong>{userEmail}</strong> tiene acceso ilimitado de por vida al editor Mineiro. ¡Disfrútalo!
+                </p>
+              </div>
+              <div className="flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-semibold">
+                🎉 Plan Ilimitado Activo
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Trial info */}
         {!isPaid && !hasUnlimitedAccess && (
           <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-4 text-sm text-violet-200">

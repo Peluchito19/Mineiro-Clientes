@@ -2,6 +2,11 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import DashboardClient from "./DashboardClient";
 
+export const metadata = {
+  title: "Dashboard",
+  description: "Gestiona tus tiendas y edita tu contenido web de forma visual con Mineiro.",
+};
+
 export default async function DashboardPage() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

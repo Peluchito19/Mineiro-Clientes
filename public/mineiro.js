@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   MINEIRO UNIFIED ENGINE v6 - Editor Visual Universal
+   MINEIRO UNIFIED ENGINE v6.1 - Editor Visual Universal
    "Una línea de código. Control total."
    
    Este script:
@@ -8,12 +8,18 @@
    3. Permite edición visual inline (modo admin)
    4. Guarda cambios directamente en las tablas originales
    5. Sincroniza cambios en tiempo real via polling (fallback si WebSocket falla)
+   
+   Performance optimizations:
+   - Lazy loading de Supabase SDK
+   - Debounced hydration
+   - Efficient DOM queries with caching
+   - RequestIdleCallback for non-critical operations
    ═══════════════════════════════════════════════════════════════════════════ */
 
 (function() {
   "use strict";
 
-  const VERSION = "6.0.0";
+  const VERSION = "6.1.0";
   const SUPABASE_URL = "https://zzgyczbiufafthizurbv.supabase.co";
   const SUPABASE_CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
   
@@ -857,17 +863,39 @@
 
     // Usar únicamente subcategorías del menú (site_config.menu.categorias)
     const menuCategorias = tiendaData?.site_config?.menu?.categorias || {};
-    const existingCategories = Object.entries(menuCategorias)
-      .map(([slug, data]) => {
-        const titulo = (data?.titulo || data?.boton || '').trim();
-        if (titulo) return titulo;
-        // Fallback: convertir slug a título
-        return slug
+    
+    // Extraer categorías del menú como lista de objetos con slug y título
+    const existingCategories = [];
+    
+    Object.entries(menuCategorias).forEach(([slug, data]) => {
+      let titulo = '';
+      if (typeof data === 'object' && data !== null) {
+        titulo = (data.titulo || data.boton || data.nombre || '').trim();
+      } else if (typeof data === 'string') {
+        titulo = data.trim();
+      }
+      
+      // Si no hay título, convertir slug a título legible
+      if (!titulo) {
+        titulo = slug
           .split('-')
           .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
           .join(' ');
-      })
-      .filter(Boolean);
+      }
+      
+      if (titulo) {
+        existingCategories.push({ slug, titulo });
+      }
+    });
+
+    // También buscar categorías en productos existentes como fallback
+    const productCategories = [...new Set(productosCache.map(p => p.categoria).filter(Boolean))];
+    productCategories.forEach(cat => {
+      if (!existingCategories.find(c => c.titulo.toLowerCase() === cat.toLowerCase())) {
+        const slug = cat.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        existingCategories.push({ slug, titulo: cat });
+      }
+    });
     
     // Detectar diseño de tarjetas de producto existentes
     const existingProductCards = document.querySelectorAll('[data-mineiro-bind*="producto-"]');
@@ -901,10 +929,10 @@
           <div class="mineiro-form-group">
             <label>Categoría</label>
             <select id="add-producto-categoria">
-              <option value="">Seleccionar...</option>
-              ${existingCategories.map(c => `<option value="${c}">${c}</option>`).join('')}
+              <option value="">Sin categoría</option>
+              ${existingCategories.map(c => `<option value="${c.titulo}">${c.titulo}</option>`).join('')}
             </select>
-            ${existingCategories.length === 0 ? '<div class="mineiro-form-info" style="margin-top:8px">No hay subcategorías configuradas en el menú.</div>' : ''}
+            ${existingCategories.length === 0 ? '<div class="mineiro-form-info" style="margin-top:8px;background:#ef4444/10;border-color:#ef4444/30;color:#fca5a5">⚠️ No hay categorías configuradas. Crea una categoría primero en la pestaña "Categoría".</div>' : ''}
           </div>
           <div class="mineiro-form-group">
             <label>Descripción (opcional)</label>
@@ -930,18 +958,18 @@
         <div class="mineiro-panel-tab-content" data-content="categoria">
           <div class="mineiro-form-group">
             <label>Nombre de la categoría</label>
-            <input type="text" id="add-categoria-nombre" placeholder="Ej: Pizzas, Bebidas, Postres..." />
+            <input type="text" id="add-categoria-nombre" placeholder="Ej: Pizzas Tradicionales, Bebidas..." />
           </div>
           <div class="mineiro-form-group">
             <label>Descripción (opcional)</label>
             <textarea id="add-categoria-descripcion" placeholder="Descripción de la categoría..."></textarea>
           </div>
-          <button class="mineiro-btn-primary" id="add-categoria-btn">📁 Crear Categoría</button>
+          <button class="mineiro-btn-primary" id="add-categoria-btn">📁 Crear Categoría en Menú</button>
           <div class="mineiro-form-info" style="margin-top:16px">
-            <strong>Categorías existentes:</strong><br>
+            <strong>Categorías del menú:</strong><br>
             ${existingCategories.length > 0 
-              ? existingCategories.map(c => `<span class="mineiro-tag">${c}</span>`).join(' ')
-              : '<em>No hay categorías aún</em>'
+              ? existingCategories.map(c => `<span class="mineiro-tag">${c.titulo}</span>`).join(' ')
+              : '<em style="color:#94a3b8">No hay categorías configuradas en el menú</em>'
             }
           </div>
         </div>
@@ -1077,7 +1105,7 @@
     const imageDrop = document.getElementById('add-producto-image-drop');
     const imagenUrl = imageDrop?.dataset?.imageUrl || '';
 
-    let categoria = catSelect.value;
+    let categoria = catSelect?.value || '';
 
     if (!nombre) {
       alert('El nombre del producto es requerido');
@@ -1085,7 +1113,7 @@
     }
 
     if (!tiendaData?.id) {
-      alert('Error: Tienda no configurada');
+      alert('Error: Tienda no configurada. Refresca la página e intenta de nuevo.');
       return;
     }
 
@@ -1094,8 +1122,31 @@
     btn.disabled = true;
 
     try {
-      // Generar dom_id único
-      const domId = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      // Generar dom_id único basado en nombre
+      const baseDomId = nombre.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Quitar acentos  
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+      
+      // Asegurar unicidad añadiendo timestamp si ya existe
+      let domId = baseDomId;
+      const existingDomIds = productosCache.map(p => p.dom_id);
+      if (existingDomIds.includes(domId)) {
+        domId = `${baseDomId}-${Date.now().toString(36)}`;
+      }
+
+      const productoData = {
+        tienda_id: tiendaData.id,
+        nombre,
+        precio,
+        categoria: categoria || null,
+        descripcion: descripcion || null,
+        imagen_url: imagenUrl || null,
+        dom_id: domId,
+        visible: true
+      };
+
+      log('Creando producto:', productoData);
 
       const response = await fetch(EDIT_API_URL, {
         method: 'POST',
@@ -1103,19 +1154,15 @@
         body: JSON.stringify({
           action: 'upsert',
           table: 'productos',
-          data: {
-            tienda_id: tiendaData.id,
-            nombre,
-            precio,
-            categoria: categoria || null,
-            descripcion: descripcion || null,
-            imagen_url: imagenUrl || null,
-            dom_id: domId,
-            visible: true
-          },
+          data: productoData,
           where: { tienda_id: tiendaData.id, dom_id: domId }
         })
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Error HTTP ${response.status}: ${errorText}`);
+      }
 
       const result = await response.json();
       
@@ -1123,6 +1170,9 @@
         // Agregar al cache local
         if (result.data) {
           productosCache.push(result.data);
+        } else {
+          // Si no viene data, crear objeto local
+          productosCache.push({ ...productoData, id: crypto.randomUUID() });
         }
         
         btn.innerHTML = '✅ ¡Producto creado!';
@@ -1133,29 +1183,41 @@
           document.getElementById('add-producto-nombre').value = '';
           document.getElementById('add-producto-precio').value = '';
           document.getElementById('add-producto-descripcion').value = '';
-          document.getElementById('add-producto-categoria').value = '';
-          imageDrop.innerHTML = '<div class="mineiro-drop-hint">📷 Arrastra una imagen o haz clic para seleccionar</div><input type="file" accept="image/*" style="display:none" />';
-          imageDrop.dataset.imageUrl = '';
-          setupImageDrop('add-producto-image-drop');
+          if (catSelect) catSelect.value = '';
+          if (imageDrop) {
+            imageDrop.innerHTML = '<div class="mineiro-drop-hint">📷 Arrastra una imagen o haz clic para seleccionar</div><input type="file" accept="image/*" style="display:none" />';
+            imageDrop.dataset.imageUrl = '';
+            setupImageDrop('add-producto-image-drop');
+          }
           
           btn.innerHTML = '➕ Crear Producto';
           btn.style.background = '';
           btn.disabled = false;
         }, 1500);
         
-        log(`✓ Producto creado: ${nombre}`);
+        log(`✓ Producto creado: ${nombre} (dom_id: ${domId})`);
       } else {
         throw new Error(result.error || 'Error al crear producto');
       }
     } catch (err) {
       warn('Error al crear producto:', err.message);
+      console.error(err);
       btn.innerHTML = '❌ Error';
       btn.style.background = '#ef4444';
+      
+      // Mostrar error al usuario
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'mineiro-form-info';
+      errorDiv.style.cssText = 'background:#ef4444/20;border:1px solid #ef4444;color:#fca5a5;margin-top:8px';
+      errorDiv.textContent = `Error: ${err.message}`;
+      btn.parentNode.appendChild(errorDiv);
+      
       setTimeout(() => {
         btn.innerHTML = '➕ Crear Producto';
         btn.style.background = '';
         btn.disabled = false;
-      }, 2000);
+        errorDiv.remove();
+      }, 3000);
     }
   };
 
@@ -1178,12 +1240,38 @@
     btn.disabled = true;
 
     try {
-      // Guardar categoría en site_config
+      // Generar slug de la categoría
+      const slug = nombre.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Quitar acentos
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+
+      // Clonar site_config y agregar categoría al menú
       const siteConfig = JSON.parse(JSON.stringify(tiendaData.site_config || {}));
-      if (!siteConfig.categorias) siteConfig.categorias = [];
       
+      // Asegurar que exista la estructura del menú
+      if (!siteConfig.menu) siteConfig.menu = {};
+      if (!siteConfig.menu.categorias) siteConfig.menu.categorias = {};
+      
+      // Agregar la nueva categoría
+      if (!siteConfig.menu.categorias[slug]) {
+        siteConfig.menu.categorias[slug] = {
+          titulo: nombre,
+          boton: nombre,
+          descripcion: descripcion || '',
+          orden: Object.keys(siteConfig.menu.categorias).length
+        };
+      } else {
+        // Ya existe, actualizar
+        siteConfig.menu.categorias[slug].titulo = nombre;
+        siteConfig.menu.categorias[slug].boton = nombre;
+        if (descripcion) siteConfig.menu.categorias[slug].descripcion = descripcion;
+      }
+
+      // También mantener compatibilidad con categorias array si existe
+      if (!siteConfig.categorias) siteConfig.categorias = [];
       if (!siteConfig.categorias.find(c => c.nombre === nombre)) {
-        siteConfig.categorias.push({ nombre, descripcion, orden: siteConfig.categorias.length });
+        siteConfig.categorias.push({ nombre, descripcion, slug, orden: siteConfig.categorias.length });
       }
 
       const response = await fetch(EDIT_API_URL, {
@@ -2627,7 +2715,7 @@
         <button class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-settings-btn" title="Configuración">
           ⚙️
         </button>
-        <button class="mineiro-admin-btn mineiro-admin-btn-primary" onclick="window.MineiroAdmin.disable()">
+        <button class="mineiro-admin-btn mineiro-admin-btn-primary" onclick="window.MineiroAdmin.exitToPanel()">
           ✓ Salir
         </button>
       </div>
@@ -3785,6 +3873,11 @@
     openDashboard: () => {
       const siteId = getSiteId();
       window.open(`https://mineiro-clientes.vercel.app/dashboard`, "_blank");
+    },
+    exitToPanel: () => {
+      // Deshabilitar modo admin y redirigir al panel
+      disableAdminMode();
+      window.location.href = "https://mineiro-clientes.vercel.app/dashboard";
     },
     refresh: async () => {
       log("Refrescando datos manualmente...");

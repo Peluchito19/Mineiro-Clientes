@@ -8,6 +8,11 @@ const UNLIMITED_ACCESS_EMAILS = [
   "natocontreras.xxi@gmail.com",
 ];
 
+export const metadata = {
+  title: "Planes y Precios",
+  description: "Elige el plan Mineiro que mejor se adapte a tu negocio. Prueba gratuita de 5 días sin compromiso.",
+};
+
 export default async function PricingPage() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
