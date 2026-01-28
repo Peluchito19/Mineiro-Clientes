@@ -855,21 +855,19 @@
     // Remover panel anterior si existe
     document.querySelector(".mineiro-panel")?.remove();
 
-    // Detectar categorías existentes (productos + config + secciones detectadas)
-    const categoriesFromProducts = productosCache
-      .map(p => (p.categoria || '').trim())
+    // Usar únicamente subcategorías del menú (site_config.menu.categorias)
+    const menuCategorias = tiendaData?.site_config?.menu?.categorias || {};
+    const existingCategories = Object.entries(menuCategorias)
+      .map(([slug, data]) => {
+        const titulo = (data?.titulo || data?.boton || '').trim();
+        if (titulo) return titulo;
+        // Fallback: convertir slug a título
+        return slug
+          .split('-')
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+      })
       .filter(Boolean);
-    const categoriesFromConfig = (tiendaData?.site_config?.categorias || [])
-      .map(c => (c?.nombre || '').trim())
-      .filter(Boolean);
-    const detectedSections = Array.from(detectProductSections().keys())
-      .map(c => (c || '').trim())
-      .filter(Boolean);
-    const existingCategories = [...new Set([
-      ...categoriesFromProducts,
-      ...categoriesFromConfig,
-      ...detectedSections,
-    ])];
     
     // Detectar diseño de tarjetas de producto existentes
     const existingProductCards = document.querySelectorAll('[data-mineiro-bind*="producto-"]');
@@ -905,9 +903,8 @@
             <select id="add-producto-categoria">
               <option value="">Seleccionar...</option>
               ${existingCategories.map(c => `<option value="${c}">${c}</option>`).join('')}
-              <option value="__new__">+ Nueva categoría</option>
             </select>
-            <input type="text" id="add-producto-categoria-nueva" placeholder="Nombre de nueva categoría" style="display:none;margin-top:8px" />
+            ${existingCategories.length === 0 ? '<div class="mineiro-form-info" style="margin-top:8px">No hay subcategorías configuradas en el menú.</div>' : ''}
           </div>
           <div class="mineiro-form-group">
             <label>Descripción (opcional)</label>
@@ -991,13 +988,6 @@
         panel.querySelector(`[data-content="${tab.dataset.tab}"]`).classList.add('active');
       };
     });
-
-    // Nueva categoría select
-    const catSelect = document.getElementById('add-producto-categoria');
-    const catNueva = document.getElementById('add-producto-categoria-nueva');
-    catSelect.onchange = () => {
-      catNueva.style.display = catSelect.value === '__new__' ? 'block' : 'none';
-    };
 
     // Image drops
     setupImageDrop('add-producto-image-drop');
@@ -1083,12 +1073,11 @@
     const nombre = document.getElementById('add-producto-nombre').value.trim();
     const precio = parseFloat(document.getElementById('add-producto-precio').value) || 0;
     const catSelect = document.getElementById('add-producto-categoria');
-    const catNueva = document.getElementById('add-producto-categoria-nueva').value.trim();
     const descripcion = document.getElementById('add-producto-descripcion').value.trim();
     const imageDrop = document.getElementById('add-producto-image-drop');
     const imagenUrl = imageDrop?.dataset?.imageUrl || '';
 
-    let categoria = catSelect.value === '__new__' ? catNueva : catSelect.value;
+    let categoria = catSelect.value;
 
     if (!nombre) {
       alert('El nombre del producto es requerido');
