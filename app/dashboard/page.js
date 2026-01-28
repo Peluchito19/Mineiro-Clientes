@@ -2,6 +2,9 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import DashboardClient from "./DashboardClient";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata = {
   title: "Dashboard",
   description: "Gestiona tus tiendas y edita tu contenido web de forma visual con Mineiro.",

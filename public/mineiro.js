@@ -183,28 +183,34 @@
         };
       }
       
-      // Si no se encontró, crear la tienda automáticamente
-      log("Tienda no encontrada, creando automáticamente...");
-      const createResponse = await fetch(TIENDA_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          slug: slug,
-          nombre: slug.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
-          url_web: window.location.origin
-        })
-      });
-      
-      const createResult = await createResponse.json();
-      if (createResult.success && createResult.tienda) {
-        log("Tienda creada exitosamente:", createResult.tienda.nombre_negocio);
-        return {
-          tienda: createResult.tienda,
-          productos: [],
-          testimonios: []
-        };
+      // Si no se encontró, NO crear automáticamente (evita reactivar páginas borradas)
+      const autoCreateScript = document.querySelector('script[data-mineiro-autocreate="true"]');
+      const shouldAutoCreate = autoCreateScript?.dataset?.mineiroAutocreate === 'true';
+
+      if (shouldAutoCreate) {
+        log("Tienda no encontrada, creando automáticamente...");
+        const createResponse = await fetch(TIENDA_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slug: slug,
+            nombre: slug.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
+            url_web: window.location.origin
+          })
+        });
+        
+        const createResult = await createResponse.json();
+        if (createResult.success && createResult.tienda) {
+          log("Tienda creada exitosamente:", createResult.tienda.nombre_negocio);
+          return {
+            tienda: createResult.tienda,
+            productos: [],
+            testimonios: []
+          };
+        }
       }
-      
+
+      warn("Tienda no registrada: no se creará automáticamente.");
       return { tienda: null, productos: [], testimonios: [] };
     } catch (apiError) {
       warn("Error con API:", apiError.message);
@@ -893,8 +899,9 @@
     // Remover panel anterior si existe
     document.querySelector(".mineiro-panel")?.remove();
 
-    // Usar únicamente subcategorías del menú (site_config.menu.categorias)
+    // Usar categorías del menú (site_config.menu.categorias)
     const menuCategorias = tiendaData?.site_config?.menu?.categorias || {};
+    const configCategorias = tiendaData?.site_config?.categorias || [];
     
     // Extraer categorías del menú como lista de objetos con slug y título
     const existingCategories = [];
@@ -902,39 +909,74 @@
     // Log para debug
     log('Menu categorias encontradas:', Object.keys(menuCategorias));
     
-    Object.entries(menuCategorias).forEach(([slug, data]) => {
-      let titulo = '';
-      
-      // Manejar diferentes estructuras de datos
-      if (typeof data === 'object' && data !== null) {
-        // Buscar el título en diferentes propiedades posibles
-        titulo = (data.titulo || data.boton || data.nombre || data.title || data.label || '').trim();
-        
-        // Si tiene icono pero no título, puede ser una categoría válida
-        if (!titulo && data.icono) {
-          titulo = slug
-            .split('-')
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ');
-        }
-      } else if (typeof data === 'string') {
-        titulo = data.trim();
-      }
-      
-      // Si aún no hay título, convertir slug a título legible
-      if (!titulo) {
+    const addCategory = (slugValue, tituloValue) => {
+      const slug = String(slugValue || '').trim();
+      let titulo = String(tituloValue || '').trim();
+
+      if (!titulo && slug) {
         titulo = slug
           .split('-')
           .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
           .join(' ');
       }
-      
-      // Agregar la categoría si tiene un slug válido
-      if (slug && slug.length > 0) {
+
+      const alreadyExists = existingCategories.some((c) =>
+        c.slug === slug || c.titulo.toLowerCase() === titulo.toLowerCase()
+      );
+
+      if (slug && slug.length > 0 && !alreadyExists) {
         existingCategories.push({ slug, titulo });
         log(`Categoría encontrada: ${slug} -> ${titulo}`);
       }
-    });
+    };
+
+    if (Array.isArray(menuCategorias)) {
+      menuCategorias.forEach((data) => {
+        if (typeof data === 'object' && data !== null) {
+          const slug = data.slug || data.id || data.key || data.nombre || data.title || data.titulo || '';
+          const titulo = data.titulo || data.boton || data.nombre || data.title || data.label || '';
+          addCategory(slug, titulo);
+        } else if (typeof data === 'string') {
+          addCategory(data.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''), data);
+        }
+      });
+    } else {
+      Object.entries(menuCategorias).forEach(([slug, data]) => {
+        let titulo = '';
+        
+        // Manejar diferentes estructuras de datos
+        if (typeof data === 'object' && data !== null) {
+          // Buscar el título en diferentes propiedades posibles
+          titulo = (data.titulo || data.boton || data.nombre || data.title || data.label || '').trim();
+          
+          // Si tiene icono pero no título, puede ser una categoría válida
+          if (!titulo && data.icono) {
+            titulo = slug
+              .split('-')
+              .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ');
+          }
+        } else if (typeof data === 'string') {
+          titulo = data.trim();
+        }
+        
+        addCategory(slug, titulo);
+      });
+    }
+
+    if (Array.isArray(configCategorias)) {
+      configCategorias.forEach((cat) => {
+        if (!cat) return;
+        if (typeof cat === 'string') {
+          const slug = cat.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+          addCategory(slug, cat);
+          return;
+        }
+        const slug = cat.slug || cat.nombre || cat.title || cat.titulo || '';
+        const titulo = cat.nombre || cat.titulo || cat.title || cat.label || '';
+        addCategory(slug, titulo);
+      });
+    }
 
     // También buscar categorías en productos existentes como fallback
     const productCategories = [...new Set(productosCache.map(p => p.categoria).filter(Boolean))];
