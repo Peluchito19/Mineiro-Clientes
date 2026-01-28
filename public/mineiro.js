@@ -3702,6 +3702,70 @@
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
+     AUTOMATIC SECTION DETECTION - Detecta categorías automáticamente
+     ───────────────────────────────────────────────────────────────────────── */
+
+  function detectProductSections() {
+    const sections = new Map(); // categoria -> {count, headings, elements}
+    
+    // Palabras clave comunes para secciones de productos
+    const categoryKeywords = [
+      'pizza', 'bebida', 'comida', 'postre', 'entrada', 'plato principal',
+      'ensalada', 'sandwich', 'burger', 'snack', 'bebidas', 'bebida caliente',
+      'jugo', 'vino', 'cerveza', 'licor', 'agua', 'refrescos',
+      'categoria', 'tipo', 'sección', 'grupo', 'clase'
+    ];
+
+    // 1. Buscar headings (h1-h3) que contengan palabras clave
+    document.querySelectorAll('h1, h2, h3, h4').forEach(heading => {
+      const text = heading.textContent?.toLowerCase() || '';
+      for (const keyword of categoryKeywords) {
+        if (text.includes(keyword)) {
+          const cleanText = heading.textContent?.trim() || 'Sin nombre';
+          if (!sections.has(cleanText)) {
+            sections.set(cleanText, {
+              count: 0,
+              elements: [],
+              detected_from: 'heading'
+            });
+          }
+          break;
+        }
+      }
+    });
+
+    // 2. Analizar estructura de elementos repetidos (probable grid/lista de productos)
+    const potentialProductContainers = document.querySelectorAll(
+      '[class*="product"], [class*="card"], [class*="item"], [class*="box"], [data-mineiro-bind*="producto"]'
+    );
+
+    // Agrupar por contenedor padre común
+    const containerGroups = new Map();
+    potentialProductContainers.forEach(el => {
+      const parent = el.closest('[class*="container"], [class*="grid"], [class*="section"], main, section, article');
+      if (parent) {
+        const parentKey = parent.className || parent.tagName;
+        if (!containerGroups.has(parentKey)) {
+          containerGroups.set(parentKey, []);
+        }
+        containerGroups.get(parentKey).push(el);
+      }
+    });
+
+    // 3. Si no hay secciones detectadas pero hay múltiples productos, crear categoría genérica
+    if (sections.size === 0 && potentialProductContainers.length > 0) {
+      sections.set('Productos', {
+        count: potentialProductContainers.length,
+        elements: Array.from(potentialProductContainers),
+        detected_from: 'auto'
+      });
+    }
+
+    log(`Secciones detectadas: ${sections.size}`, Array.from(sections.keys()));
+    return sections;
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────────
      PUBLIC API
      ───────────────────────────────────────────────────────────────────────── */
 
@@ -3760,70 +3824,6 @@
     isBarVisible: () => adminBarVisible,
     version: VERSION,
     detectSections: detectProductSections, // Expone la función de detección
-  };
-
-  /* ─────────────────────────────────────────────────────────────────────────
-     AUTOMATIC SECTION DETECTION - Detecta categorías automáticamente
-     ───────────────────────────────────────────────────────────────────────── */
-
-  const detectProductSections = () => {
-    const sections = new Map(); // categoria -> {count, headings, elements}
-    
-    // Palabras clave comunes para secciones de productos
-    const categoryKeywords = [
-      'pizza', 'bebida', 'comida', 'postre', 'entrada', 'plato principal',
-      'ensalada', 'sandwich', 'burger', 'snack', 'bebidas', 'bebida caliente',
-      'jugo', 'vino', 'cerveza', 'licor', 'agua', 'refrescos',
-      'categoria', 'tipo', 'sección', 'grupo', 'clase'
-    ];
-
-    // 1. Buscar headings (h1-h3) que contengan palabras clave
-    document.querySelectorAll('h1, h2, h3, h4').forEach(heading => {
-      const text = heading.textContent?.toLowerCase() || '';
-      for (const keyword of categoryKeywords) {
-        if (text.includes(keyword)) {
-          const cleanText = heading.textContent?.trim() || 'Sin nombre';
-          if (!sections.has(cleanText)) {
-            sections.set(cleanText, {
-              count: 0,
-              elements: [],
-              detected_from: 'heading'
-            });
-          }
-          break;
-        }
-      }
-    });
-
-    // 2. Analizar estructura de elementos repetidos (probable grid/lista de productos)
-    const potentialProductContainers = document.querySelectorAll(
-      '[class*="product"], [class*="card"], [class*="item"], [class*="box"], [data-mineiro-bind*="producto"]'
-    );
-
-    // Agrupar por contenedor padre común
-    const containerGroups = new Map();
-    potentialProductContainers.forEach(el => {
-      const parent = el.closest('[class*="container"], [class*="grid"], [class*="section"], main, section, article');
-      if (parent) {
-        const parentKey = parent.className || parent.tagName;
-        if (!containerGroups.has(parentKey)) {
-          containerGroups.set(parentKey, []);
-        }
-        containerGroups.get(parentKey).push(el);
-      }
-    });
-
-    // 3. Si no hay secciones detectadas pero hay múltiples productos, crear categoría genérica
-    if (sections.size === 0 && potentialProductContainers.length > 0) {
-      sections.set('Productos', {
-        count: potentialProductContainers.length,
-        elements: Array.from(potentialProductContainers),
-        detected_from: 'auto'
-      });
-    }
-
-    log(`Secciones detectadas: ${sections.size}`, Array.from(sections.keys()));
-    return sections;
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
