@@ -9,6 +9,7 @@ const PLANS = [
     price: "$50.000",
     priceNum: 50000,
     description: "Acceso completo, renovable cada mes.",
+    checkoutUrl: "https://www.mercadopago.cl/subscriptions/checkout?preapproval_plan_id=789b506f988246a38fed6da2e892660b",
   },
   {
     id: "anual",
@@ -17,6 +18,7 @@ const PLANS = [
     priceNum: 500000,
     description: "Ahorra pagando el año completo.",
     badge: "Ahorra 2 meses",
+    checkoutUrl: "https://link.mercadopago.cl/mineiroclientes",
   },
 ];
 
@@ -30,6 +32,12 @@ export default function PricingClient({ userId, userEmail, tienda, hasUnlimitedA
     setError("");
     setSuccess("");
     setLoadingPlan(planId);
+
+    const selectedPlan = PLANS.find((plan) => plan.id === planId);
+    if (selectedPlan?.checkoutUrl) {
+      window.location.href = selectedPlan.checkoutUrl;
+      return;
+    }
 
     try {
       const response = await fetch("/api/checkout", {
@@ -154,9 +162,9 @@ export default function PricingClient({ userId, userEmail, tienda, hasUnlimitedA
         {/* Trial info */}
         {!isPaid && !hasUnlimitedAccess && (
           <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-4 text-sm text-violet-200">
-            <span className="font-semibold">🎁 Prueba gratis 3 días</span> — Al seleccionar un plan, ingresarás tu método de pago. 
-            Tu tarjeta no será cobrada hasta que termine el período de prueba. Puedes cancelar en cualquier momento.
-          </div>
+              <span className="font-semibold">🎁 Prueba gratis 5 días</span> — Al seleccionar un plan, ingresarás tu método de pago. 
+              Tu tarjeta no será cobrada hasta que termine el período de prueba. Puedes cancelar en cualquier momento.
+            </div>
         )}
 
         <div className="grid gap-6 md:grid-cols-2">
