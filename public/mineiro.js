@@ -855,8 +855,21 @@
     // Remover panel anterior si existe
     document.querySelector(".mineiro-panel")?.remove();
 
-    // Detectar categorías existentes
-    const existingCategories = [...new Set(productosCache.map(p => p.categoria).filter(Boolean))];
+    // Detectar categorías existentes (productos + config + secciones detectadas)
+    const categoriesFromProducts = productosCache
+      .map(p => (p.categoria || '').trim())
+      .filter(Boolean);
+    const categoriesFromConfig = (tiendaData?.site_config?.categorias || [])
+      .map(c => (c?.nombre || '').trim())
+      .filter(Boolean);
+    const detectedSections = Array.from(detectProductSections().keys())
+      .map(c => (c || '').trim())
+      .filter(Boolean);
+    const existingCategories = [...new Set([
+      ...categoriesFromProducts,
+      ...categoriesFromConfig,
+      ...detectedSections,
+    ])];
     
     // Detectar diseño de tarjetas de producto existentes
     const existingProductCards = document.querySelectorAll('[data-mineiro-bind*="producto-"]');
