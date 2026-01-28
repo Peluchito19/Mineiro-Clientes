@@ -3759,6 +3759,71 @@
     isAdminMode: () => adminMode,
     isBarVisible: () => adminBarVisible,
     version: VERSION,
+    detectSections: detectProductSections, // Expone la función de detección
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     AUTOMATIC SECTION DETECTION - Detecta categorías automáticamente
+     ───────────────────────────────────────────────────────────────────────── */
+
+  const detectProductSections = () => {
+    const sections = new Map(); // categoria -> {count, headings, elements}
+    
+    // Palabras clave comunes para secciones de productos
+    const categoryKeywords = [
+      'pizza', 'bebida', 'comida', 'postre', 'entrada', 'plato principal',
+      'ensalada', 'sandwich', 'burger', 'snack', 'bebidas', 'bebida caliente',
+      'jugo', 'vino', 'cerveza', 'licor', 'agua', 'refrescos',
+      'categoria', 'tipo', 'sección', 'grupo', 'clase'
+    ];
+
+    // 1. Buscar headings (h1-h3) que contengan palabras clave
+    document.querySelectorAll('h1, h2, h3, h4').forEach(heading => {
+      const text = heading.textContent?.toLowerCase() || '';
+      for (const keyword of categoryKeywords) {
+        if (text.includes(keyword)) {
+          const cleanText = heading.textContent?.trim() || 'Sin nombre';
+          if (!sections.has(cleanText)) {
+            sections.set(cleanText, {
+              count: 0,
+              elements: [],
+              detected_from: 'heading'
+            });
+          }
+          break;
+        }
+      }
+    });
+
+    // 2. Analizar estructura de elementos repetidos (probable grid/lista de productos)
+    const potentialProductContainers = document.querySelectorAll(
+      '[class*="product"], [class*="card"], [class*="item"], [class*="box"], [data-mineiro-bind*="producto"]'
+    );
+
+    // Agrupar por contenedor padre común
+    const containerGroups = new Map();
+    potentialProductContainers.forEach(el => {
+      const parent = el.closest('[class*="container"], [class*="grid"], [class*="section"], main, section, article');
+      if (parent) {
+        const parentKey = parent.className || parent.tagName;
+        if (!containerGroups.has(parentKey)) {
+          containerGroups.set(parentKey, []);
+        }
+        containerGroups.get(parentKey).push(el);
+      }
+    });
+
+    // 3. Si no hay secciones detectadas pero hay múltiples productos, crear categoría genérica
+    if (sections.size === 0 && potentialProductContainers.length > 0) {
+      sections.set('Productos', {
+        count: potentialProductContainers.length,
+        elements: Array.from(potentialProductContainers),
+        detected_from: 'auto'
+      });
+    }
+
+    log(`Secciones detectadas: ${sections.size}`, Array.from(sections.keys()));
+    return sections;
   };
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -3796,10 +3861,32 @@
 
         log(`Cargados: ${productosCache.length} productos, ${testimoniosCache.length} testimonios`);
         if (productosCache.length > 0) {
-          log("Productos:", productosCache.map(p => `${p.nombre} (id:${p.id}, dom_id:${p.dom_id || 'none'})`).join(", "));
+          log("Productos:", productosCache.map(p => `${p.nombre} (id:${p.id}, dom_id:${p.dom_id || 'none'}, categoria:${p.categoria || 'sin asignar'})`).join(", "));
         }
         if (testimoniosCache.length > 0) {
           log("Testimonios:", testimoniosCache.map(t => `${t.nombre} (id:${t.id}, dom_id:${t.dom_id || 'none'})`).join(", "));
+        }
+
+        // Detectar secciones automáticamente
+        const detectedSections = detectProductSections();
+        
+        // Asignar productos a secciones detectadas automáticamente si no tienen categoría
+        if (detectedSections.size > 0 && productosCache.length > 0) {
+          const sectionArray = Array.from(detectedSections.keys());
+          log(`Asignando productos a secciones detectadas...`, sectionArray);
+          
+          // Agrupar productos sin categoría
+          const productsWithoutCategory = productosCache.filter(p => !p.categoria);
+          if (productsWithoutCategory.length > 0 && sectionArray.length > 0) {
+            // Distribuir productos sin categoría entre las secciones detectadas
+            productsWithoutCategory.forEach((producto, idx) => {
+              const assignedSection = sectionArray[idx % sectionArray.length];
+              if (assignedSection && assignedSection !== 'Productos') {
+                log(`Asignando ${producto.nombre} a sección: ${assignedSection}`);
+                producto.categoria = assignedSection;
+              }
+            });
+          }
         }
 
         // Hydrate elements (intento inicial)

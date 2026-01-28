@@ -17,6 +17,17 @@ export default function LoginPage() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
+  const [recaptchaToken, setRecaptchaToken] = useState(null);
+
+  // Initialize reCAPTCHA
+  useEffect(() => {
+    if (window.grecaptcha && !isRegister) {
+      // Only load reCAPTCHA on login form
+      window.grecaptcha.ready(() => {
+        // reCAPTCHA will be ready
+      });
+    }
+  }, [isRegister]);
 
   // Check if already logged in
   useEffect(() => {
@@ -63,6 +74,22 @@ export default function LoginPage() {
         );
         setLoading(false);
         return;
+      }
+
+      // Execute reCAPTCHA for both login and registration
+      if (window.grecaptcha) {
+        try {
+          const token = await new Promise((resolve, reject) => {
+            window.grecaptcha.execute(
+              process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '',
+              { action: isRegister ? 'register' : 'login' }
+            ).then(resolve).catch(reject);
+          });
+          setRecaptchaToken(token);
+        } catch (err) {
+          console.warn("reCAPTCHA execution failed (non-blocking):", err);
+          // Continue without reCAPTCHA token
+        }
       }
 
       if (isRegister) {
@@ -305,6 +332,13 @@ export default function LoginPage() {
                   {message}
                 </div>
               )}
+
+              {/* reCAPTCHA notice */}
+              <p className="text-xs text-slate-400 text-center">
+                Este sitio está protegido por reCAPTCHA y se aplican la
+                <a href="https://policies.google.com/privacy" className="text-cyan-400 hover:underline"> Política de Privacidad</a> y
+                <a href="https://policies.google.com/terms" className="text-cyan-400 hover:underline"> Términos de Servicio</a> de Google.
+              </p>
 
               <button
                 type="submit"

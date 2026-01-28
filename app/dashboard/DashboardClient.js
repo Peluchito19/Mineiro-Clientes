@@ -38,6 +38,8 @@ export default function DashboardClient({
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordStatus, setPasswordStatus] = useState("");
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [deletedTiendaIds, setDeletedTiendaIds] = useState(new Set()); // Track deleted stores locally
 
   // Update form when selected tienda changes
   useEffect(() => {
@@ -224,6 +226,9 @@ export default function DashboardClient({
       return;
     }
 
+    // Track deletion locally to prevent re-appearance on refresh
+    setDeletedTiendaIds((prev) => new Set([...prev, tiendaId]));
+
     // Update local state
     const remaining = tiendas.filter((t) => t.id !== tiendaId);
     setTiendas(remaining);
@@ -239,7 +244,7 @@ export default function DashboardClient({
   const handleLogout = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
-    window.location.href = "/login";
+    window.location.href = "/";
   };
 
   // Check if URL/slug already exists
@@ -472,6 +477,8 @@ export default function DashboardClient({
     );
   }
 
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-12">
@@ -492,17 +499,50 @@ export default function DashboardClient({
             >
               {isPaid ? `Plan: ${plan}` : "🎁 Activar Plan"}
             </a>
-            <button
-              onClick={handleLogout}
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
-            >
-              Cerrar sesión
-            </button>
+            {/* Profile Bubble Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowProfileMenu(!showProfileMenu)}
+                className="rounded-full w-10 h-10 bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-white font-semibold shadow-lg hover:shadow-cyan-500/30 transition"
+                title="Menú de perfil"
+              >
+                {userEmail?.charAt(0).toUpperCase() || "U"}
+              </button>
+              {showProfileMenu && (
+                <div className="absolute right-0 mt-2 w-56 rounded-2xl border border-slate-700/70 bg-slate-900/95 backdrop-blur shadow-2xl z-50">
+                  <div className="border-b border-slate-700/50 px-4 py-3">
+                    <p className="text-xs text-slate-400">Cuenta</p>
+                    <p className="text-sm font-medium text-white truncate">{userEmail}</p>
+                  </div>
+                  <div className="p-2 space-y-1">
+                    <button
+                      onClick={() => {
+                        setShowProfileMenu(false);
+                        // Scroll to profile section
+                        document.getElementById("profile-section")?.scrollIntoView({ behavior: "smooth" });
+                      }}
+                      className="w-full text-left px-4 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800/50 transition"
+                    >
+                      ⚙️ Editar perfil
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowProfileMenu(false);
+                        handleLogout();
+                      }}
+                      className="w-full text-left px-4 py-2 rounded-lg text-sm text-rose-400 hover:bg-rose-500/10 transition"
+                    >
+                      🚪 Cerrar sesión
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
         {/* Perfil de Usuario */}
-        <section className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
+        <section id="profile-section" className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
           <div className="flex flex-col gap-2 mb-6">
             <h2 className="text-xl font-semibold text-white">Perfil y Acceso</h2>
             <p className="text-sm text-slate-300">
@@ -624,20 +664,21 @@ export default function DashboardClient({
 
         {/* Store Settings + Connection Script Combined */}
         {selectedTienda && (
-          <section className="rounded-2xl border-2 border-cyan-500/30 bg-slate-900/60 p-8 shadow-xl backdrop-blur">
-            <div className="flex items-center gap-2 mb-6">
-              <span className="text-2xl">⚙️</span>
+          <section className="rounded-2xl border-2 border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-orange-500/5 p-8 shadow-xl backdrop-blur">
+            <div className="flex items-start gap-3 mb-8">
+              <span className="text-3xl">⚙️</span>
               <div>
-                <h2 className="text-xl font-semibold text-white">
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
                   Configuración y Conexión
                 </h2>
-                <p className="text-sm text-slate-300">
+                <p className="text-sm text-slate-300 mt-1">
                   Configura tu tienda y conecta el editor visual a tu sitio web.
                 </p>
               </div>
             </div>
 
-            <form className="grid gap-5 md:grid-cols-3 mb-8" onSubmit={handleSaveTienda}>
+            {/* Configuration Form */}
+            <form className="grid gap-5 md:grid-cols-3 mb-8 bg-slate-900/40 rounded-xl p-6 border border-slate-800/50" onSubmit={handleSaveTienda}>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-200">
                   Nombre del Negocio
@@ -646,7 +687,7 @@ export default function DashboardClient({
                   value={tiendaNombre}
                   onChange={(e) => setTiendaNombre(e.target.value)}
                   placeholder="Mi Restaurante"
-                  className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
+                  className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-amber-400/70 focus:ring-2 focus:ring-amber-500/30"
                 />
               </div>
 
@@ -658,7 +699,7 @@ export default function DashboardClient({
                   value={tiendaUrl}
                   onChange={(e) => setTiendaUrl(e.target.value)}
                   placeholder="https://mirestaurante.com"
-                  className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-violet-400/70 focus:ring-2 focus:ring-violet-500/30"
+                  className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-orange-400/70 focus:ring-2 focus:ring-orange-500/30"
                 />
               </div>
 
@@ -670,14 +711,14 @@ export default function DashboardClient({
                   value={tiendaSlug}
                   onChange={(e) => setTiendaSlug(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
                   placeholder="mi-restaurante"
-                  className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-500/30"
+                  className="w-full rounded-xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-amber-400/70 focus:ring-2 focus:ring-amber-500/30"
                 />
               </div>
 
               <div className="md:col-span-3 flex justify-end">
                 <button
                   type="submit"
-                  className="rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:brightness-110"
+                  className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-amber-500/20 transition hover:brightness-110"
                 >
                   {tiendaStatus || "Guardar Cambios"}
                 </button>
@@ -722,7 +763,7 @@ export default function DashboardClient({
                         href={`${tiendaUrl}?mineiro-admin`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-semibold shadow-lg shadow-cyan-500/20 hover:brightness-110 transition"
+                        className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold shadow-lg shadow-amber-500/20 hover:brightness-110 transition"
                       >
                         🎨 Abrir Editor Visual
                       </a>

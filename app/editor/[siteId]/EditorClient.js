@@ -337,6 +337,7 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showMobilePanel, setShowMobilePanel] = useState(false);
 
   // Load tienda data
   useEffect(() => {
@@ -452,6 +453,12 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
   const handleUpdateProducto = useCallback(async (productoId, field, value) => {
     if (!supabase) return;
 
+    // Check if user has editing rights (paid or trial)
+    if (tienda && tienda.estado_pago === false && tienda.plan !== "trial") {
+      alert("Tu suscripción ha expirado. Tus cambios anteriores se mantienen, pero necesitas renovar tu plan para continuar editando. Ve a Pricing para activar tu plan.");
+      return;
+    }
+
     setIsSaving(true);
     setSaveStatus("saving");
 
@@ -484,11 +491,17 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
     } finally {
       setIsSaving(false);
     }
-  }, [supabase]);
+  }, [supabase, tienda]);
 
   // Update site config
   const handleUpdateSiteConfig = useCallback(async (section, field, value) => {
     if (!supabase || !tienda) return;
+
+    // Check if user has editing rights (paid or trial)
+    if (tienda.estado_pago === false && tienda.plan !== "trial") {
+      alert("Tu suscripción ha expirado. Tus cambios anteriores se mantienen, pero necesitas renovar tu plan para continuar editando. Ve a Pricing para activar tu plan.");
+      return;
+    }
 
     setIsSaving(true);
     setSaveStatus("saving");
@@ -592,22 +605,25 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       {/* Top Bar */}
       <header className="h-14 border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm flex items-center justify-between px-4 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <a href="/dashboard" className="flex items-center gap-2 text-amber-400 font-bold">
-            <Zap size={20} />
-            <span>Mineiro Editor</span>
-          </a>
-          <div className="h-6 w-px bg-slate-700" />
-          <div className="flex items-center gap-2 text-sm">
-            <Globe size={14} className="text-slate-400" />
-            <span className="text-slate-300">{tienda?.nombre_negocio || siteId}</span>
+        <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+          <button
+            onClick={() => window.location.href = "/dashboard"}
+            title="Volver al dashboard"
+            className="text-amber-400 hover:text-amber-300 transition flex-shrink-0 p-2 hover:bg-slate-800 rounded-lg"
+          >
+            <Home size={20} />
+          </button>
+          <div className="h-6 w-px bg-slate-700 hidden sm:block" />
+          <div className="flex items-center gap-2 text-sm min-w-0">
+            <Globe size={14} className="text-slate-400 flex-shrink-0" />
+            <span className="text-slate-300 truncate text-xs sm:text-sm">{tienda?.nombre_negocio || siteId}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* Save Status */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          {/* Save Status - Hidden on small mobile */}
           {saveStatus && (
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${
+            <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${
               saveStatus === "saved" ? "bg-emerald-500/20 text-emerald-300" :
               saveStatus === "saving" ? "bg-amber-500/20 text-amber-300" :
               "bg-rose-500/20 text-rose-300"
@@ -615,13 +631,15 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
               {saveStatus === "saving" && <Loader2 size={14} className="animate-spin" />}
               {saveStatus === "saved" && <Check size={14} />}
               {saveStatus === "error" && <X size={14} />}
-              {saveStatus === "saving" ? "Guardando..." : 
-               saveStatus === "saved" ? "Guardado" : "Error"}
+              <span className="hidden md:inline">
+                {saveStatus === "saving" ? "Guardando..." : 
+                 saveStatus === "saved" ? "Guardado" : "Error"}
+              </span>
             </div>
           )}
 
           {/* Preview size buttons */}
-          <div className="flex items-center bg-slate-800 rounded-lg p-1">
+          <div className="hidden md:flex items-center bg-slate-800 rounded-lg p-1">
             <button
               onClick={() => setPreviewSize("mobile")}
               className={`p-2 rounded-md transition-colors ${previewSize === "mobile" ? "bg-slate-700 text-white" : "text-slate-400 hover:text-white"}`}
@@ -647,28 +665,52 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
 
           <button
             onClick={handleRefreshPreview}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors text-sm"
+            className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors text-sm"
           >
             <RefreshCw size={14} />
-            Refrescar
+            <span className="hidden md:inline">Refrescar</span>
           </button>
 
           <a
             href={siteUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 transition-colors text-sm"
+            className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 transition-colors text-sm"
           >
             <ExternalLink size={14} />
-            Ver sitio
+            <span className="hidden md:inline">Ver sitio</span>
           </a>
+
+          {/* Mobile Panel Toggle */}
+          <button
+            onClick={() => setShowMobilePanel(!showMobilePanel)}
+            className="md:hidden p-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+            title="Mostrar/Ocultar panel"
+          >
+            {showMobilePanel ? <X size={18} /> : <Settings size={18} />}
+          </button>
         </div>
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel - Editor */}
-        <aside className="w-[420px] border-r border-slate-800 bg-slate-900/50 flex flex-col flex-shrink-0">
+      <div className="flex-1 flex overflow-hidden flex-col md:flex-row">
+        {/* Left Panel - Editor (Mobile: overlay/drawer, Desktop: side panel) */}
+        <aside className={`${
+          showMobilePanel 
+            ? "absolute inset-0 md:relative md:inset-auto top-14 z-40 md:z-auto" 
+            : "hidden md:flex"
+        } w-full md:w-[420px] border-r border-slate-800 bg-slate-900/50 flex flex-col flex-shrink-0 overflow-y-auto`}>
+          {/* Close button for mobile */}
+          <div className="md:hidden flex items-center justify-between border-b border-slate-800 px-4 py-3 bg-slate-900/80 sticky top-0">
+            <span className="text-sm font-medium text-slate-300">Panel de edición</span>
+            <button
+              onClick={() => setShowMobilePanel(false)}
+              className="p-1 rounded hover:bg-slate-800"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
           {/* Tabs */}
           <div className="flex border-b border-slate-800">
             <button
@@ -680,7 +722,7 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
               }`}
             >
               <Package size={16} />
-              Productos
+              <span className="hidden sm:inline">Productos</span>
             </button>
             <button
               onClick={() => setActiveTab("hero")}
@@ -691,7 +733,7 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
               }`}
             >
               <Layout size={16} />
-              Hero
+              <span className="hidden sm:inline">Hero</span>
             </button>
             <button
               onClick={() => setActiveTab("footer")}
@@ -702,9 +744,19 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
               }`}
             >
               <FileText size={16} />
-              Footer
+              <span className="hidden sm:inline">Footer</span>
             </button>
-          </div>
+            <button
+              onClick={() => setActiveTab("testimonios")}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+                activeTab === "testimonios"
+                  ? "text-pink-400 border-b-2 border-pink-400 bg-slate-800/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <MessageSquare size={16} />
+              <span className="hidden sm:inline">Testimonios</span>
+            </button>
 
           {/* Tab Content */}
           <div className="flex-1 overflow-y-auto p-4">
@@ -847,6 +899,32 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
                 />
               </div>
             )}
+
+            {/* Testimonios Tab */}
+            {activeTab === "testimonios" && (
+              <div className="space-y-4">
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold text-white mb-1">Testimonios</h3>
+                  <p className="text-sm text-slate-400">Gestiona los comentarios de clientes</p>
+                </div>
+                {testimonios.length === 0 ? (
+                  <div className="text-center py-8">
+                    <MessageSquare size={40} className="mx-auto text-slate-600 mb-3" />
+                    <p className="text-slate-400 text-sm">No hay testimonios aún</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4">
+                    {testimonios.map((testimonio) => (
+                      <div key={testimonio.id} className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-4 hover:border-slate-600 transition-all">
+                        <p className="text-sm text-slate-300 font-medium">{testimonio.nombre}</p>
+                        <p className="text-xs text-slate-500 mt-1">{testimonio.texto}</p>
+                        <p className="text-xs text-amber-400 mt-2">★★★★★ {testimonio.rating || 5}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Stats Footer */}
@@ -863,11 +941,11 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
         </aside>
 
         {/* Right Panel - Preview */}
-        <main className="flex-1 bg-slate-950 flex flex-col items-center justify-center p-6 overflow-hidden">
+        <main className="flex-1 bg-slate-950 flex flex-col items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden">
           <div
-            className="bg-white rounded-xl shadow-2xl overflow-hidden transition-all duration-300"
+            className="bg-white rounded-lg sm:rounded-xl shadow-2xl overflow-hidden transition-all duration-300"
             style={{
-              width: previewSizes[previewSize].width,
+              width: previewSize === "desktop" ? "100%" : (previewSizes[previewSize]?.width || "100%"),
               height: previewSize === "desktop" ? "100%" : "calc(100% - 40px)",
               maxWidth: "100%",
             }}
@@ -876,7 +954,7 @@ export default function EditorClient({ siteId, site, initialElements, userId }) 
               <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
                 <div className="text-center">
                   <Loader2 size={40} className="mx-auto text-cyan-400 animate-spin mb-3" />
-                  <p className="text-slate-400">Cargando vista previa...</p>
+                  <p className="text-slate-400 text-sm">Cargando vista previa...</p>
                 </div>
               </div>
             )}

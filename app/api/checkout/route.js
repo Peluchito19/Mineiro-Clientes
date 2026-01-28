@@ -42,18 +42,21 @@ export async function POST(request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: tienda } = await supabase
+  // Get first tienda (or any tienda) for this user
+  const { data: tiendas, error: tiendaError } = await supabase
     .from("tiendas")
     .select("id, nombre_negocio")
     .eq("user_id", user.id)
-    .maybeSingle();
+    .limit(1);
 
-  if (!tienda) {
+  if (tiendaError || !tiendas || tiendas.length === 0) {
     return NextResponse.json(
-      { error: "No se encontró la tienda del usuario." },
+      { error: "Necesitas crear una tienda antes de contratar un plan. Vuelve al dashboard y crea tu primera tienda." },
       { status: 404 }
     );
   }
+
+  const tienda = tiendas[0];
 
   const body = await request.json().catch(() => ({}));
   const plan = body?.plan === "anual" ? "anual" : "mensual";
