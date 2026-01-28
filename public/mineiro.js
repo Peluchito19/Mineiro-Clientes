@@ -1267,6 +1267,7 @@
 
       const productoData = {
         tienda_id: tiendaData.id,
+        user_id: tiendaData.user_id || null,
         nombre,
         precio,
         categoria: categoria || null,
