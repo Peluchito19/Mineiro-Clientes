@@ -857,6 +857,38 @@
      PANEL: AÑADIR CONTENIDO (Productos, Categorías, Testimonios)
      ───────────────────────────────────────────────────────────────────────── */
 
+  // Función para registrar cambios en la tabla elements (para historial)
+  const registerElementChange = async (binding, elementId, type, name, originalValue, newValue) => {
+    if (!tiendaData?.slug) return;
+    
+    try {
+      const response = await fetch(EDIT_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upsert',
+          table: 'elements',
+          data: {
+            site_id: tiendaData.slug,
+            element_id: elementId || binding,
+            type: type || 'text',
+            name: name || binding,
+            original_value: String(originalValue || '').substring(0, 1000),
+            current_value: String(newValue || '').substring(0, 1000),
+            updated_at: new Date().toISOString()
+          },
+          where: { site_id: tiendaData.slug, element_id: elementId || binding }
+        })
+      });
+      
+      if (response.ok) {
+        log(`✓ Cambio registrado en historial: ${binding}`);
+      }
+    } catch (err) {
+      warn('Error registrando cambio:', err.message);
+    }
+  };
+
   const showAddContentPanel = () => {
     // Remover panel anterior si existe
     document.querySelector(".mineiro-panel")?.remove();
@@ -867,15 +899,29 @@
     // Extraer categorías del menú como lista de objetos con slug y título
     const existingCategories = [];
     
+    // Log para debug
+    log('Menu categorias encontradas:', Object.keys(menuCategorias));
+    
     Object.entries(menuCategorias).forEach(([slug, data]) => {
       let titulo = '';
+      
+      // Manejar diferentes estructuras de datos
       if (typeof data === 'object' && data !== null) {
-        titulo = (data.titulo || data.boton || data.nombre || '').trim();
+        // Buscar el título en diferentes propiedades posibles
+        titulo = (data.titulo || data.boton || data.nombre || data.title || data.label || '').trim();
+        
+        // Si tiene icono pero no título, puede ser una categoría válida
+        if (!titulo && data.icono) {
+          titulo = slug
+            .split('-')
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+        }
       } else if (typeof data === 'string') {
         titulo = data.trim();
       }
       
-      // Si no hay título, convertir slug a título legible
+      // Si aún no hay título, convertir slug a título legible
       if (!titulo) {
         titulo = slug
           .split('-')
@@ -883,19 +929,23 @@
           .join(' ');
       }
       
-      if (titulo) {
+      // Agregar la categoría si tiene un slug válido
+      if (slug && slug.length > 0) {
         existingCategories.push({ slug, titulo });
+        log(`Categoría encontrada: ${slug} -> ${titulo}`);
       }
     });
 
     // También buscar categorías en productos existentes como fallback
     const productCategories = [...new Set(productosCache.map(p => p.categoria).filter(Boolean))];
     productCategories.forEach(cat => {
-      if (!existingCategories.find(c => c.titulo.toLowerCase() === cat.toLowerCase())) {
+      if (!existingCategories.find(c => c.titulo.toLowerCase() === cat.toLowerCase() || c.slug === cat.toLowerCase().replace(/[^a-z0-9]+/g, '-'))) {
         const slug = cat.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
         existingCategories.push({ slug, titulo: cat });
       }
     });
+    
+    log(`Total categorías disponibles: ${existingCategories.length}`, existingCategories.map(c => c.titulo));
     
     // Detectar diseño de tarjetas de producto existentes
     const existingProductCards = document.querySelectorAll('[data-mineiro-bind*="producto-"]');
@@ -3701,6 +3751,18 @@
 
       // Agregar al historial para poder deshacer
       addToHistory(el, binding || el.dataset.mineiroBind, oldValue, value, parsed.field);
+      
+      // Registrar cambio en tabla elements para historial del dashboard
+      const changeType = isImage ? 'image' : (el.tagName.toLowerCase() === 'a' ? 'link' : 'text');
+      const elementName = parsed.field || binding;
+      await registerElementChange(
+        binding || el.dataset.mineiroBind,
+        `${parsed.type}-${parsed.identifier || parsed.domId || parsed.field}`,
+        changeType,
+        elementName,
+        oldTextContent || oldValue,
+        plainTextValue || valueForAPI
+      );
 
       // Cerrar popup con feedback de éxito
       const popup = document.querySelector(".mineiro-edit-popup");

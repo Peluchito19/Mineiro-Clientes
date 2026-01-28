@@ -26,7 +26,7 @@ export async function POST(request) {
     console.log("Edit API llamada:", { action, table, where });
 
     // Validar tablas permitidas
-    const allowedTables = ["tiendas", "productos", "testimonios"];
+    const allowedTables = ["tiendas", "productos", "testimonios", "elements"];
     if (!allowedTables.includes(table)) {
       return NextResponse.json({ error: "Tabla no permitida" }, { status: 400, headers: corsHeaders });
     }

@@ -27,6 +27,8 @@ export default function PricingClient({ userId, userEmail, tienda, hasUnlimitedA
   const [activatingDemo, setActivatingDemo] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [isActivated, setIsActivated] = useState(tienda?.estado_pago === true);
+  const [activatedPlan, setActivatedPlan] = useState(tienda?.plan || null);
 
   const handleCheckout = async (planId) => {
     setError("");
@@ -82,10 +84,16 @@ export default function PricingClient({ userId, userEmail, tienda, hasUnlimitedA
         throw new Error(data.error || "No se pudo activar el acceso.");
       }
 
+      // Actualizar estado local inmediatamente
+      setIsActivated(true);
+      setActivatedPlan("unlimited");
       setSuccess(data.message || "¡Acceso ilimitado activado!");
+      setActivatingDemo(false);
+      
+      // Redirigir después de un momento
       setTimeout(() => {
         window.location.href = "/dashboard?status=demo-activated";
-      }, 1500);
+      }, 2000);
     } catch (err) {
       setError(err?.message || "Ocurrió un error inesperado.");
       setActivatingDemo(false);
@@ -93,8 +101,8 @@ export default function PricingClient({ userId, userEmail, tienda, hasUnlimitedA
   };
 
   // Check if already paid
-  const isPaid = tienda?.estado_pago;
-  const currentPlan = tienda?.plan;
+  const isPaid = isActivated || tienda?.estado_pago;
+  const currentPlan = activatedPlan || tienda?.plan;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
