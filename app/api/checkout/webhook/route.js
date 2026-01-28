@@ -30,6 +30,12 @@ export async function POST(request) {
     const status = payment?.status;
     const metadata = payment?.metadata || {};
     const tiendaId = metadata?.tienda_id || payment?.external_reference;
+    const amount =
+      payment?.transaction_amount ??
+      payment?.transaction_details?.total_paid_amount ??
+      payment?.transaction_details?.net_received_amount;
+    const resolvedPlan =
+      amount && amount >= 500000 ? "anual" : "mensual";
 
     if (status === "approved" && tiendaId) {
       const supabase = createClient(supabaseUrl, serviceRoleKey, {
@@ -38,7 +44,7 @@ export async function POST(request) {
 
       await supabase
         .from("tiendas")
-        .update({ estado_pago: true })
+        .update({ estado_pago: true, plan: resolvedPlan })
         .eq("id", tiendaId);
     }
   } catch {
