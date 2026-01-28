@@ -315,6 +315,16 @@
       return { type: "testimonio", domId: testimonioMatch[1], field: testimonioMatch[2] };
     }
 
+    // Menu categorias: "menu.categorias.{categoria-slug}.{field}"
+    const menuCategoriaMatch = binding.match(/^menu\.categorias\.([a-zA-Z0-9\-_]+)\.(.+)$/);
+    if (menuCategoriaMatch) {
+      return { 
+        type: "menu-categoria", 
+        categoriaSlug: menuCategoriaMatch[1], 
+        field: menuCategoriaMatch[2] 
+      };
+    }
+
     // Producto: "producto-{dom_id_or_uuid}.nombre"
     const productoMatch = binding.match(/^producto-([a-zA-Z0-9\-_]+)\.(.+)$/);
     if (productoMatch) {
@@ -422,6 +432,37 @@
         break;
       }
 
+      case "menu-categoria": {
+        // Buscar en site_config.menu.categorias
+        const menuConfig = siteConfig.menu || {};
+        const categoriasConfig = menuConfig.categorias || {};
+        const categoriaConfig = categoriasConfig[parsed.categoriaSlug] || {};
+        
+        value = categoriaConfig[parsed.field];
+        
+        // Si no existe en la config, usar valores por defecto
+        if (value === undefined && parsed.field === "titulo") {
+          // Convertir slug a título (ej: "tradicionales" -> "Tradicionales")
+          value = parsed.categoriaSlug
+            .split("-")
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ");
+        }
+        
+        // Handle special actions for buttons
+        if (parsed.field === "boton" && el.tagName.toLowerCase() === "button") {
+          // Add click handler to filter products by category
+          el.addEventListener("click", () => {
+            filterProductsByCategory(parsed.categoriaSlug, productos);
+          });
+          // Set button text if value exists
+          if (value) {
+            el.textContent = value;
+          }
+        }
+        break;
+      }
+
       case "producto": {
         // Find by dom_id first, then by UUID
         const producto = productos.find(p => p.dom_id === parsed.identifier)
@@ -438,6 +479,36 @@
     if (value !== undefined && value !== null) {
       applyValueToElement(el, value, parsed.field);
     }
+  };
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     CATEGORY FILTERING
+     ───────────────────────────────────────────────────────────────────────── */
+
+  const filterProductsByCategory = (categoriaSlug, productos) => {
+    // Convert slug back to category name for matching
+    // "tradicionales" -> "Tradicionales", "de-casa" -> "De Casa"
+    const categoryName = categoriaSlug
+      .split("-")
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+    
+    // Find containers that show products
+    const containers = document.querySelectorAll("[data-mineiro-section], [data-mineiro-category-display]");
+    
+    containers.forEach(container => {
+      const filtered = productos.filter(p => {
+        const prodCat = (p.categoria || "").toLowerCase();
+        const searchCat = categoryName.toLowerCase();
+        return prodCat === searchCat || prodCat.includes(searchCat) || searchCat.includes(prodCat);
+      });
+      
+      if (filtered.length > 0) {
+        renderSectionProducts(container, categoryName, productos);
+      }
+    });
+    
+    log(`Filtrado por categoría: ${categoryName} (${categoriaSlug})`);
   };
 
   const runHydrationMode = (tienda, productos, testimonios) => {

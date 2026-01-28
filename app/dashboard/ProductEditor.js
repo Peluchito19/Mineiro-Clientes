@@ -101,12 +101,37 @@ function SnippetGenerator({ productId, productName, categoria, isNew }) {
 
   const siteUrl = typeof window !== "undefined" ? window.location.origin : "";
 
+  // Convert category name to slug format (e.g., "De Casa" -> "de-casa")
+  const categoriaSlug = categoria 
+    ? categoria.toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9\-]/g, "")
+    : "general";
+
   const snippets = {
     section: `<!-- Pega esto UNA VEZ donde quieras mostrar todos los productos de "${categoria || "General"}" -->
 <div data-mineiro-section="${categoria || "General"}"></div>
 
 <!-- Script al final del body (solo una vez) -->
 <script src="${siteUrl}/mineiro-engine.js"></script>`,
+
+    categoryBindings: `<!-- Bindings para la categoría "${categoria || "General"}" -->
+<!-- Botón de categoría (se activa automáticamente para filtrar) -->
+<button data-mineiro-bind="menu.categorias.${categoriaSlug}.boton">
+  ${categoria || "Categoría"}
+</button>
+
+<!-- Ícono de categoría -->
+<i data-mineiro-bind="menu.categorias.${categoriaSlug}.icono" class="icon-${categoriaSlug}"></i>
+
+<!-- Título de categoría -->
+<h2 data-mineiro-bind="menu.categorias.${categoriaSlug}.titulo">
+  ${categoria || "Categoría"}
+</h2>
+
+<!-- Contenedor para mostrar productos de esta categoría -->
+<div data-mineiro-section="${categoria || "General"}" data-mineiro-category-display></div>`,
 
     bindPrice: `<!-- Para mostrar el precio de "${productName || "este producto"}" -->
 <span data-mineiro-bind="producto-${productId}.precio">$0</span>`,
@@ -183,6 +208,12 @@ function SnippetGenerator({ productId, productName, categoria, isNew }) {
             Sección Completa
           </Tabs.Trigger>
           <Tabs.Trigger
+            value="category"
+            className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-slate-200 data-[state=active]:text-amber-400 data-[state=active]:border-b-2 data-[state=active]:border-amber-400 transition-colors"
+          >
+            Categoría
+          </Tabs.Trigger>
+          <Tabs.Trigger
             value="bind"
             className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-slate-200 data-[state=active]:text-amber-400 data-[state=active]:border-b-2 data-[state=active]:border-amber-400 transition-colors"
           >
@@ -199,6 +230,26 @@ function SnippetGenerator({ productId, productName, categoria, isNew }) {
               {snippets.section}
             </pre>
             <CopyButton snippetKey="section" />
+          </div>
+        </Tabs.Content>
+
+        <Tabs.Content value="category" className="p-4 space-y-4">
+          <div className="relative">
+            <p className="text-xs text-slate-400 mb-2">
+              Bindings completos para la categoría "{categoria || "General"}" (botón, ícono, título y productos):
+            </p>
+            <pre className="bg-slate-900 rounded-lg p-3 pr-12 text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap">
+              {snippets.categoryBindings}
+            </pre>
+            <CopyButton snippetKey="categoryBindings" />
+          </div>
+          <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+            <p className="text-xs text-slate-400">
+              <strong className="text-amber-400">Formato del slug:</strong> {categoriaSlug}
+            </p>
+            <p className="text-xs text-slate-400 mt-2">
+              Los botones con <code className="bg-slate-700 px-1 rounded text-xs">data-mineiro-bind="menu.categorias.{categoriaSlug}.boton"</code> filtran automáticamente los productos de esta categoría.
+            </p>
           </div>
         </Tabs.Content>
 
