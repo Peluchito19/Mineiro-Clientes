@@ -1227,6 +1227,103 @@
     };
   };
 
+  // Función para renderizar un nuevo producto en contenedores existentes
+  const tryRenderNewProduct = (producto) => {
+    const categoria = producto.categoria?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || '';
+    const domId = producto.dom_id || producto.id;
+    
+    log(`Intentando renderizar producto: ${producto.nombre} en categoría: ${categoria}`);
+    
+    // Buscar contenedores de sección que coincidan con la categoría
+    const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
+    let rendered = false;
+    
+    sectionContainers.forEach(container => {
+      const sectionName = container.dataset.mineiroSection?.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      
+      // Si la categoría coincide o el container es genérico
+      if (sectionName === categoria || sectionName === 'todos' || sectionName === 'all' || !categoria) {
+        const card = createProductCard(producto);
+        container.appendChild(card);
+        rendered = true;
+        log(`✓ Producto renderizado en sección: ${sectionName}`);
+      }
+    });
+    
+    // Buscar contenedores de categoría específicos
+    const categoryContainers = document.querySelectorAll(`[data-mineiro-category="${categoria}"], [data-mineiro-categoria="${categoria}"]`);
+    categoryContainers.forEach(container => {
+      const card = createProductCard(producto);
+      container.appendChild(card);
+      rendered = true;
+      log(`✓ Producto renderizado en categoría: ${categoria}`);
+    });
+    
+    if (!rendered) {
+      log(`ℹ️ No se encontró contenedor para mostrar el producto. El producto fue guardado en la base de datos.`);
+      log(`   Para mostrarlo, agrega: <div data-mineiro-section="${categoria || 'productos'}"></div>`);
+    }
+    
+    return rendered;
+  };
+
+  // Crear tarjeta de producto HTML
+  const createProductCard = (producto) => {
+    const domId = producto.dom_id || producto.id;
+    const precio = typeof producto.precio === 'number' 
+      ? formatCLP(producto.precio) 
+      : producto.precio || '$0';
+    
+    const card = document.createElement('div');
+    card.className = 'mineiro-product-card';
+    card.dataset.mineiroProductId = domId;
+    card.innerHTML = `
+      <div style="background:#1e293b;border-radius:12px;overflow:hidden;border:1px solid #334155;transition:transform 0.2s">
+        ${producto.imagen_url ? `
+          <img 
+            data-mineiro-bind="producto-${domId}.imagen_url" 
+            src="${producto.imagen_url}" 
+            alt="${producto.nombre}"
+            style="width:100%;height:160px;object-fit:cover"
+          />
+        ` : `
+          <div style="width:100%;height:160px;background:#0f172a;display:flex;align-items:center;justify-content:center;color:#64748b">
+            📷 Sin imagen
+          </div>
+        `}
+        <div style="padding:16px">
+          <div style="font-size:12px;color:#f59e0b;margin-bottom:4px;text-transform:uppercase">
+            ${producto.categoria || 'Sin categoría'}
+          </div>
+          <h3 
+            data-mineiro-bind="producto-${domId}.nombre"
+            style="font-size:16px;font-weight:600;color:#f1f5f9;margin:0 0 8px 0"
+          >${producto.nombre}</h3>
+          ${producto.descripcion ? `
+            <p 
+              data-mineiro-bind="producto-${domId}.descripcion"
+              style="font-size:13px;color:#94a3b8;margin:0 0 12px 0"
+            >${producto.descripcion}</p>
+          ` : ''}
+          <div 
+            data-mineiro-bind="producto-${domId}.precio"
+            style="font-size:20px;font-weight:700;color:#f59e0b"
+          >${precio}</div>
+        </div>
+      </div>
+    `;
+    
+    // Hacer editable si está en modo admin
+    if (adminMode) {
+      card.querySelectorAll('[data-mineiro-bind]').forEach(el => {
+        el.style.cursor = 'pointer';
+        el.style.outline = '1px dashed rgba(34,211,238,0.4)';
+      });
+    }
+    
+    return card;
+  };
+
   const createNewProduct = async () => {
     const nombre = document.getElementById('add-producto-nombre').value.trim();
     const precio = parseFloat(document.getElementById('add-producto-precio').value) || 0;
@@ -1299,15 +1396,14 @@
       
       if (result.success) {
         // Agregar al cache local
-        if (result.data) {
-          productosCache.push(result.data);
-        } else {
-          // Si no viene data, crear objeto local
-          productosCache.push({ ...productoData, id: crypto.randomUUID() });
-        }
+        const newProduct = result.data || { ...productoData, id: crypto.randomUUID() };
+        productosCache.push(newProduct);
         
         btn.innerHTML = '✅ ¡Producto creado!';
         btn.style.background = '#22c55e';
+        
+        // Intentar renderizar el producto en contenedores existentes
+        tryRenderNewProduct(newProduct);
         
         // Limpiar form
         setTimeout(() => {
@@ -1326,7 +1422,7 @@
           btn.disabled = false;
         }, 1500);
         
-        log(`✓ Producto creado: ${nombre} (dom_id: ${domId})`);
+        log(`✓ Producto creado: ${nombre} (dom_id: ${domId}, categoria: ${categoria})`);
       } else {
         throw new Error(result.error || 'Error al crear producto');
       }
