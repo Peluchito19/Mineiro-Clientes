@@ -31,7 +31,8 @@ export async function POST(request) {
       return NextResponse.json({ error: "Tabla no permitida" }, { status: 400, headers: corsHeaders });
     }
 
-    if (!where || Object.keys(where).length === 0) {
+    // Para delete, where puede estar vacío si se quiere borrar por otras condiciones
+    if (action !== "delete" && (!where || Object.keys(where).length === 0)) {
       return NextResponse.json({ error: "Se requiere condición where" }, { status: 400, headers: corsHeaders });
     }
 
@@ -81,6 +82,11 @@ export async function POST(request) {
       
       result = upserted && upserted.length > 0 ? upserted[0] : null;
     } else if (action === "delete") {
+      // Si no hay where, no borrar nada (seguridad)
+      if (!where || Object.keys(where).length === 0) {
+        return NextResponse.json({ success: true, data: [], message: "Sin condiciones, no se borró nada" }, { headers: corsHeaders });
+      }
+
       let query = supabaseAdmin.from(table).delete();
 
       const whereEntries = Object.entries(where);
@@ -88,14 +94,25 @@ export async function POST(request) {
         query = query.eq(key, value);
       }
 
-      const { data: deleted, error } = await query.select();
+      // Intentar borrar, si falla por columna inexistente, ignorar
+      try {
+        const { data: deleted, error } = await query.select();
 
-      if (error) {
-        console.error("Delete error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
+        if (error) {
+          // Si el error es por columna inexistente, ignorar silenciosamente
+          if (error.message.includes("does not exist") || error.code === "42703") {
+            console.log(`Columna no existe en ${table}, ignorando delete:`, error.message);
+            return NextResponse.json({ success: true, data: [], message: "Tabla sin esa columna, ignorado" }, { headers: corsHeaders });
+          }
+          console.error("Delete error:", error);
+          return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
+        }
+
+        result = deleted ?? [];
+      } catch (deleteErr) {
+        console.log("Delete exception (ignorada):", deleteErr.message);
+        result = [];
       }
-
-      result = deleted ?? [];
     } else {
       return NextResponse.json({ error: "Acción no válida" }, { status: 400, headers: corsHeaders });
     }

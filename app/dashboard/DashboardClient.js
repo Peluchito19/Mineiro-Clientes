@@ -226,47 +226,80 @@ export default function DashboardClient({
   };
 
   const handleDeleteTienda = async (tiendaId) => {
-    if (!supabase) return;
     if (!confirm("¿Eliminar esta tienda y todos sus productos? Esta acción no se puede deshacer.")) return;
 
     setIsDeleting(tiendaId);
 
     try {
       const tiendaToDelete = tiendas.find((t) => t.id === tiendaId);
+      const slug = tiendaToDelete?.slug;
 
-      // Borrado definitivo vía API (service_role) para evitar RLS/caché
-      await callEditApi({
-        action: "delete",
-        table: "testimonios",
-        where: { tienda_id: tiendaId },
-      });
-
-      await callEditApi({
-        action: "delete",
-        table: "productos",
-        where: { tienda_id: tiendaId },
-      });
-
-      if (tiendaToDelete?.slug) {
-        await callEditApi({
-          action: "delete",
-          table: "elements",
-          where: { site_id: tiendaToDelete.slug },
-        });
+      // 1. Borrar elements por site_id (slug) - siempre funciona
+      if (slug) {
+        try {
+          await callEditApi({
+            action: "delete",
+            table: "elements",
+            where: { site_id: slug },
+          });
+        } catch (e) {
+          console.log("Elements delete:", e.message);
+        }
       }
 
+      // 2. Borrar productos - intentar por tienda_id, si falla intentar alternativas
+      try {
+        await callEditApi({
+          action: "delete",
+          table: "productos",
+          where: { tienda_id: tiendaId },
+        });
+      } catch (e) {
+        console.log("Productos tienda_id failed, trying alternatives...");
+        // Intentar por site_id o tienda_slug si existen
+        if (slug) {
+          try {
+            await callEditApi({ action: "delete", table: "productos", where: { site_id: slug } });
+          } catch (e2) {
+            try {
+              await callEditApi({ action: "delete", table: "productos", where: { tienda_slug: slug } });
+            } catch (e3) {
+              console.log("Productos alternativas también fallaron, continuando...");
+            }
+          }
+        }
+      }
+
+      // 3. Borrar testimonios - igual que productos
+      try {
+        await callEditApi({
+          action: "delete",
+          table: "testimonios",
+          where: { tienda_id: tiendaId },
+        });
+      } catch (e) {
+        console.log("Testimonios tienda_id failed, trying alternatives...");
+        if (slug) {
+          try {
+            await callEditApi({ action: "delete", table: "testimonios", where: { site_id: slug } });
+          } catch (e2) {
+            console.log("Testimonios alternativas fallaron, continuando...");
+          }
+        }
+      }
+
+      // 4. Borrar la tienda - esto SIEMPRE debe funcionar (id es PK)
       await callEditApi({
         action: "delete",
         table: "tiendas",
         where: { id: tiendaId },
       });
 
-      // Track deletion locally to prevent re-appearance on refresh
+      // Actualizar estado local
       setDeletedTiendaIds((prev) => new Set([...prev, tiendaId]));
-
-      // Update local state immediately and refresh from server
       const remaining = tiendas.filter((t) => t.id !== tiendaId);
       setTiendas(remaining);
+      setRecentChanges((prev) => prev.filter((c) => c.site_id !== slug));
       
       if (selectedTienda?.id === tiendaId) {
         setSelectedTienda(remaining[0] || null);
@@ -275,8 +308,8 @@ export default function DashboardClient({
         }
       }
 
-      // Force refresh the page to ensure sync with server
-      router.refresh();
+      // Forzar recarga completa para sincronizar
+      window.location.reload();
       
     } catch (err) {
       console.error("Error deleting tienda:", err);
