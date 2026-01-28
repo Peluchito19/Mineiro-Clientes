@@ -175,6 +175,106 @@ BEGIN
 END $$;
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- COMPATIBILIDAD: asegurar tienda_id en productos/testimonios
+-- ─────────────────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'productos') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'productos' AND column_name = 'tienda_id'
+    ) THEN
+      ALTER TABLE productos ADD COLUMN tienda_id UUID;
+    END IF;
+
+    -- Backfill desde site_id (slug)
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'productos' AND column_name = 'site_id'
+    ) THEN
+      UPDATE productos p
+      SET tienda_id = t.id
+      FROM tiendas t
+      WHERE p.tienda_id IS NULL AND t.slug = p.site_id;
+    END IF;
+
+    -- Backfill desde tienda_slug
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'productos' AND column_name = 'tienda_slug'
+    ) THEN
+      UPDATE productos p
+      SET tienda_id = t.id
+      FROM tiendas t
+      WHERE p.tienda_id IS NULL AND t.slug = p.tienda_slug;
+    END IF;
+
+    -- Backfill desde tienda (texto)
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'productos' AND column_name = 'tienda'
+    ) THEN
+      UPDATE productos p
+      SET tienda_id = t.id
+      FROM tiendas t
+      WHERE p.tienda_id IS NULL AND t.slug = p.tienda;
+    END IF;
+
+    -- Crear índice y FK si no existen
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname = 'idx_productos_tienda_id'
+    ) THEN
+      CREATE INDEX idx_productos_tienda_id ON productos(tienda_id);
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'productos_tienda_id_fkey'
+    ) THEN
+      ALTER TABLE productos
+      ADD CONSTRAINT productos_tienda_id_fkey
+      FOREIGN KEY (tienda_id) REFERENCES tiendas(id) ON DELETE CASCADE;
+    END IF;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'testimonios') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'testimonios' AND column_name = 'tienda_id'
+    ) THEN
+      ALTER TABLE testimonios ADD COLUMN tienda_id UUID;
+    END IF;
+
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'testimonios' AND column_name = 'site_id'
+    ) THEN
+      UPDATE testimonios tm
+      SET tienda_id = t.id
+      FROM tiendas t
+      WHERE tm.tienda_id IS NULL AND t.slug = tm.site_id;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname = 'idx_testimonios_tienda_id'
+    ) THEN
+      CREATE INDEX idx_testimonios_tienda_id ON testimonios(tienda_id);
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'testimonios_tienda_id_fkey'
+    ) THEN
+      ALTER TABLE testimonios
+      ADD CONSTRAINT testimonios_tienda_id_fkey
+      FOREIGN KEY (tienda_id) REFERENCES tiendas(id) ON DELETE CASCADE;
+    END IF;
+  END IF;
+END $$;
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- RLS PARA PRODUCTOS - Permitir lectura pública
 -- ─────────────────────────────────────────────────────────────────────────
 DO $$ 
