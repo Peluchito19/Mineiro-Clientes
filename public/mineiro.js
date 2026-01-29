@@ -325,17 +325,41 @@
   // Guardar elementos preservados en localStorage
   const savePreservedBindings = () => {
     try {
-      const bindings = [];
+      // Combinar elementos del Set con los bindings actuales
+      const bindings = new Set([...preservedBindingsSet]);
       preservedOriginalElements.forEach(el => {
         if (el.dataset?.mineiroBind) {
-          bindings.push(el.dataset.mineiroBind);
+          bindings.add(el.dataset.mineiroBind);
         }
       });
-      localStorage.setItem(PRESERVED_STORAGE_KEY, JSON.stringify(bindings));
-      log(`Guardados ${bindings.length} bindings preservados en localStorage`);
+      localStorage.setItem(PRESERVED_STORAGE_KEY, JSON.stringify([...bindings]));
+      log(`Guardados ${bindings.size} bindings preservados en localStorage`);
     } catch (err) {
       warn('Error guardando preserved bindings:', err.message);
     }
+  };
+  
+  // Remover un binding de los preservados (cuando el usuario guarda un nuevo valor)
+  const removeFromPreserved = (binding) => {
+    preservedBindingsSet.delete(binding);
+    // Buscar y desmarcar el elemento
+    document.querySelectorAll(`[data-mineiro-bind="${binding}"]`).forEach(el => {
+      preservedOriginalElements.delete(el);
+      delete el.dataset.mineiroPreserved;
+    });
+    savePreservedBindings();
+    log(`Binding removido de preservados: ${binding}`);
+  };
+  
+  // Limpiar TODOS los elementos preservados
+  const clearAllPreserved = () => {
+    preservedBindingsSet.clear();
+    preservedOriginalElements.clear();
+    document.querySelectorAll('[data-mineiro-preserved]').forEach(el => {
+      delete el.dataset.mineiroPreserved;
+    });
+    localStorage.removeItem(PRESERVED_STORAGE_KEY);
+    log('✓ Todos los elementos preservados han sido limpiados');
   };
   
   // Set de bindings que fueron preservados (persiste entre recargas)
@@ -406,13 +430,20 @@
   };
 
   const hydrateElement = (el, tienda, productos, testimonios) => {
-    // No hidratar elementos que el usuario preservó como originales
-    if (preservedOriginalElements.has(el) || el.dataset.mineiroPreserved === 'true') {
-      log(`Elemento preservado, saltando hidratación: ${el.dataset.mineiroBind}`);
+    const binding = el.dataset.mineiroBind;
+    
+    // TRIPLE verificación para no hidratar elementos preservados:
+    // 1. Está en el Set de elementos preservados
+    // 2. Tiene el atributo data-mineiro-preserved
+    // 3. Su binding está en localStorage (preservedBindingsSet)
+    if (preservedOriginalElements.has(el) || 
+        el.dataset.mineiroPreserved === 'true' || 
+        preservedBindingsSet.has(binding)) {
+      log(`⚠️ Elemento preservado, NO se hidrata: ${binding}`);
+      el.dataset.mineiroPreserved = 'true'; // Asegurar que esté marcado
       return;
     }
     
-    const binding = el.dataset.mineiroBind;
     const parsed = parseBinding(binding);
 
     if (!parsed) {
@@ -1355,6 +1386,48 @@
         rendered = true;
         log(`✓ Producto renderizado en contenedor genérico`);
       }
+    }
+    
+    // Estrategia 5: ÚLTIMA OPCIÓN - Buscar el padre de cualquier producto existente
+    if (!rendered) {
+      const anyProductElement = document.querySelector('[data-mineiro-bind*="producto-"]');
+      if (anyProductElement) {
+        // Subir hasta encontrar un contenedor con múltiples hijos
+        let container = anyProductElement.parentElement;
+        let attempts = 0;
+        while (container && container.children.length < 2 && attempts < 5) {
+          container = container.parentElement;
+          attempts++;
+        }
+        
+        if (container && container !== document.body) {
+          const card = createProductCard(producto, container);
+          container.appendChild(card);
+          rendered = true;
+          log(`✓ Producto renderizado en contenedor detectado automáticamente`);
+        }
+      }
+    }
+    
+    // Estrategia 6: Crear un contenedor flotante temporal
+    if (!rendered) {
+      log(`⚠️ No se encontró contenedor. Creando contenedor flotante temporal.`);
+      
+      // Buscar donde insertar - después del primer producto o al final del main/body
+      const insertPoint = document.querySelector('main, .main, #main, .content, article') || document.body;
+      
+      // Crear sección temporal para el nuevo producto
+      const tempSection = document.createElement('div');
+      tempSection.className = 'mineiro-new-products-section';
+      tempSection.style.cssText = 'padding:20px;margin:20px 0;background:rgba(6,182,212,0.1);border:2px dashed #06b6d4;border-radius:12px;';
+      tempSection.innerHTML = `<h3 style="color:#06b6d4;margin:0 0 16px 0;font-size:14px;">✨ Nuevos productos (recarga para ver en su categoría)</h3>`;
+      tempSection.dataset.mineiroSection = 'nuevos';
+      
+      const card = createProductCard(producto, null);
+      tempSection.appendChild(card);
+      insertPoint.appendChild(tempSection);
+      rendered = true;
+      log(`✓ Producto renderizado en sección temporal`);
     }
     
     if (!rendered) {
@@ -3191,7 +3264,7 @@
         <span>Mineiro Editor</span>
       </div>
       <div class="mineiro-admin-center">
-        <div class="mineiro-admin-hint">Haz clic en cualquier elemento para editarlo</div>
+        <div class="mineiro-admin-hint">👆 Doble-click para editar | Click normal = navegar</div>
         <button class="mineiro-admin-btn mineiro-admin-btn-warning" id="mineiro-undo-btn" style="display:none">
           ↩️ Deshacer
         </button>
@@ -3231,8 +3304,11 @@
     document.getElementById("mineiro-add-btn").onclick = showAddContentPanel;
     document.getElementById("mineiro-settings-btn").onclick = showSettingsPanel;
 
-    // Add click listener for editing
-    document.addEventListener("click", handleAdminClick, true);
+    // Add DOUBLE-click listener for editing (single click = normal navigation)
+    document.addEventListener("dblclick", handleAdminDoubleClick, true);
+    
+    // Single click solo para resaltar elementos editables
+    document.addEventListener("click", handleAdminSingleClick, true);
 
     // Keyboard shortcuts
     document.addEventListener("keydown", handleKeyboardShortcuts);
@@ -3240,7 +3316,7 @@
     // Agregar botones "+" a las secciones de categorías para añadir productos
     addCategoryAddButtons();
 
-    log("Modo admin activado - Haz clic en cualquier elemento con data-mineiro-bind para editarlo");
+    log("Modo admin activado - DOBLE-CLICK para editar, click normal para navegar");
     log("Atajos: Ctrl+Z para deshacer, Escape para cerrar popup");
   };
 
@@ -3292,7 +3368,8 @@
     document.getElementById("mineiro-show-bar-btn")?.remove();
     document.querySelector(".mineiro-edit-popup")?.remove();
     document.body.classList.remove("mineiro-admin-active", "bar-hidden");
-    document.removeEventListener("click", handleAdminClick, true);
+    document.removeEventListener("dblclick", handleAdminDoubleClick, true);
+    document.removeEventListener("click", handleAdminSingleClick, true);
     document.removeEventListener("keydown", handleKeyboardShortcuts);
     
     // Remover botones de agregar producto de categorías
@@ -3546,20 +3623,16 @@
     }
   };
 
-  const handleAdminClick = (e) => {
-    // Ignorar clics en popup
-    if (e.target.closest(".mineiro-edit-popup")) {
-      return;
-    }
-
-    // Ignorar clics en barra de admin
-    if (e.target.closest(".mineiro-admin-bar") || e.target.closest(".mineiro-show-bar-btn")) {
+  // SINGLE CLICK - Solo resalta elementos editables, NO bloquea navegación
+  const handleAdminSingleClick = (e) => {
+    // Ignorar clics en popup o barra de admin
+    if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal")) {
       return;
     }
 
     const el = e.target.closest("[data-mineiro-bind]");
     if (!el) {
-      // Clic fuera de elementos editables - cerrar popup
+      // Clic fuera - cerrar popup y quitar selección
       document.querySelector(".mineiro-edit-popup")?.remove();
       if (selectedElement) {
         selectedElement.classList.remove("mineiro-selected");
@@ -3568,57 +3641,66 @@
       return;
     }
 
-    // Si es un enlace y el usuario mantiene Ctrl/Cmd o Shift, permitir navegación normal
-    const isLink = el.tagName.toLowerCase() === 'a' || el.closest('a');
-    const wantsNavigation = e.ctrlKey || e.metaKey || e.shiftKey;
+    // Solo resaltar el elemento - NO bloquear navegación
+    if (selectedElement && selectedElement !== el) {
+      selectedElement.classList.remove("mineiro-selected");
+    }
+    selectedElement = el;
+    el.classList.add("mineiro-selected");
     
-    if (isLink && wantsNavigation) {
-      // Permitir navegación normal - no interceptar
-      log('Navegación permitida (Ctrl/Shift + click)');
+    // Mostrar hint de doble-click si es la primera vez
+    if (!el.dataset.mineiroHintShown) {
+      el.dataset.mineiroHintShown = 'true';
+      showEditHint(el);
+    }
+    
+    // NO hacer preventDefault - permitir navegación normal en enlaces
+  };
+
+  // DOUBLE CLICK - Abre el editor
+  const handleAdminDoubleClick = (e) => {
+    // Ignorar clics en popup o barra de admin
+    if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal")) {
       return;
     }
-    
-    // Si es un enlace de categoría del menú, mostrar tooltip de ayuda
-    if (isLink && el.closest('[data-mineiro-bind*="menu.categorias"]')) {
-      // Primera vez: mostrar hint
-      if (!el.dataset.mineiroHintShown) {
-        el.dataset.mineiroHintShown = 'true';
-        showNavigationHint(el);
-      }
-    }
+
+    const el = e.target.closest("[data-mineiro-bind]");
+    if (!el) return;
 
     e.preventDefault();
     e.stopPropagation();
 
-    // Deseleccionar anterior
-    if (selectedElement) {
+    // Seleccionar elemento
+    if (selectedElement && selectedElement !== el) {
       selectedElement.classList.remove("mineiro-selected");
     }
-
     selectedElement = el;
     el.classList.add("mineiro-selected");
 
     // Guardar estilos computados para referencia
     saveComputedStyles(el);
 
+    // Abrir editor
     showEditPopup(el);
+    log(`Editando: ${el.dataset.mineiroBind}`);
   };
 
-  // Mostrar tooltip de ayuda para navegación
-  const showNavigationHint = (el) => {
-    // Remover hints anteriores
+  // Mostrar hint de doble-click
+  const showEditHint = (el) => {
     document.querySelectorAll('.mineiro-nav-hint').forEach(h => h.remove());
     
     const hint = document.createElement('div');
     hint.className = 'mineiro-nav-hint';
-    hint.innerHTML = `Para navegar: <kbd>Ctrl</kbd>+click o <kbd>Shift</kbd>+click`;
+    hint.innerHTML = `<strong>Doble-click</strong> para editar`;
+    hint.style.cssText = 'position:fixed;z-index:100003;pointer-events:none;';
     
-    // Posicionar sobre el elemento
-    el.style.position = 'relative';
-    el.appendChild(hint);
+    const rect = el.getBoundingClientRect();
+    hint.style.top = `${rect.top - 40}px`;
+    hint.style.left = `${rect.left + rect.width/2}px`;
+    hint.style.transform = 'translateX(-50%)';
     
-    // Auto-remover después de 3 segundos
-    setTimeout(() => hint.remove(), 3000);
+    document.body.appendChild(hint);
+    setTimeout(() => hint.remove(), 2000);
   };
 
   const showEditPopup = (el) => {
