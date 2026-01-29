@@ -60,14 +60,37 @@ export async function POST(request) {
       result = updated && updated.length > 0 ? updated[0] : null;
       
       if (!result) {
-        // Si no se actualizó nada, puede que no exista - intentar verificar
-        console.log("No se actualizó ninguna fila, verificando si existe...");
+        // IMPORTANTE: Si no se actualizó nada, es un ERROR - el registro no existe
+        console.error("UPDATE FALLÓ: No se encontró registro con", where);
         return NextResponse.json({ 
-          success: true, 
-          data: null,
-          message: "Actualización procesada (puede que no haya cambios)"
-        }, { headers: corsHeaders });
+          success: false, 
+          error: `No se encontró el registro para actualizar. Condición: ${JSON.stringify(where)}`,
+          data: null
+        }, { status: 404, headers: corsHeaders });
       }
+      
+      console.log("UPDATE exitoso:", table, where, "->", result?.id);
+      
+    } else if (action === "clear-elements") {
+      // Limpiar todos los elementos registrados de una tienda
+      const tiendaId = where?.tienda_id;
+      if (!tiendaId) {
+        return NextResponse.json({ error: "Se requiere tienda_id" }, { status: 400, headers: corsHeaders });
+      }
+      
+      const { data: deleted, error } = await supabaseAdmin
+        .from("elements")
+        .delete()
+        .eq("tienda_id", tiendaId)
+        .select();
+      
+      if (error) {
+        console.error("Clear elements error:", error);
+        return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
+      }
+      
+      console.log(`Limpiados ${deleted?.length || 0} elementos de tienda ${tiendaId}`);
+      result = { cleared: deleted?.length || 0 };
       
     } else if (action === "upsert") {
       const { data: upserted, error } = await supabaseAdmin

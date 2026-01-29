@@ -3795,7 +3795,8 @@
     }
   };
 
-  // SINGLE CLICK - Abre editor para TODO excepto enlaces (que requieren doble-click)
+  // SINGLE CLICK - Para elementos que NO son enlaces: abre editor
+  // Para enlaces: SIEMPRE navega (el click no se bloquea)
   const handleAdminSingleClick = (e) => {
     // Ignorar clics en popup o barra de admin
     if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal, .mineiro-panel")) {
@@ -3813,40 +3814,79 @@
       return;
     }
 
-    // 🔗 DETECTAR SI ES UN ENLACE DE NAVEGACIÓN
-    // Un enlace es: el propio elemento es <a> O está dentro de un <a> O tiene href
+    // 🔗 DETECTAR SI ES ENLACE O ESTÁ DENTRO DE UN ENLACE
     const linkAncestor = el.closest('a');
     const isLink = el.tagName.toLowerCase() === 'a';
-    const hasHref = el.hasAttribute('href') || linkAncestor?.hasAttribute('href');
-    const isNavigationLink = isLink || (linkAncestor && hasHref);
+    const isInsideLink = linkAncestor !== null;
     
-    // También detectar botones de navegación
-    const isNavButton = el.closest('nav, .nav, .menu, .navbar, [role="navigation"]');
-    const looksLikeNavLink = isNavigationLink || (isNavButton && (isLink || linkAncestor));
-    
-    // Debug para ver qué está pasando
-    log(`🖱️ Click en: ${el.tagName} | binding: ${el.dataset.mineiroBind} | esEnlace: ${looksLikeNavLink}`);
-    
-    if (looksLikeNavLink) {
-      // Para enlaces: solo resaltar, NO abrir editor (requiere doble-click)
-      // NO bloquear el evento - permitir navegación normal
-      
-      if (selectedElement && selectedElement !== el) {
-        selectedElement.classList.remove("mineiro-selected");
-      }
-      selectedElement = el;
-      el.classList.add("mineiro-selected");
-      
-      // Mostrar hint de doble-click para editar enlaces (solo una vez)
-      if (!el.dataset.mineiroHintShown) {
-        el.dataset.mineiroHintShown = 'true';
-        showLinkEditHint(el);
-      }
-      
-      log(`   → Enlace detectado, permitiendo navegación. Doble-click para editar.`);
-      // NO llamar preventDefault() ni stopPropagation() - dejar que el navegador maneje el click
+    // Si es un enlace o está dentro de uno: NO BLOQUEAR, permitir navegación
+    if (isLink || isInsideLink) {
+      log(`🖱️ Click en enlace: ${el.dataset.mineiroBind} → Navegando (doble-click para editar nombre)`);
+      // NO hacer nada - dejar que el navegador navegue normalmente
       return;
     }
+
+    // Para TODO lo demás (precios, títulos, textos, imágenes): ABRIR EDITOR
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (selectedElement && selectedElement !== el) {
+      selectedElement.classList.remove("mineiro-selected");
+    }
+    selectedElement = el;
+    el.classList.add("mineiro-selected");
+
+    saveComputedStyles(el);
+    showEditPopup(el);
+    log(`🖱️ Click en elemento: ${el.dataset.mineiroBind} → Abriendo editor`);
+  };
+
+  // DOUBLE CLICK - SOLO para editar el NOMBRE de enlaces/categorías
+  const handleAdminDoubleClick = (e) => {
+    // Ignorar clics en popup o barra de admin
+    if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal, .mineiro-panel")) {
+      return;
+    }
+
+    const el = e.target.closest("[data-mineiro-bind]");
+    if (!el) return;
+
+    // 🔗 DETECTAR SI ES ENLACE
+    const linkAncestor = el.closest('a');
+    const isLink = el.tagName.toLowerCase() === 'a';
+    const isInsideLink = linkAncestor !== null;
+    
+    // Doble-click SOLO funciona para enlaces (para editar su nombre)
+    if (!isLink && !isInsideLink) {
+      // Para no-enlaces, el single-click ya abrió el editor
+      return;
+    }
+
+    // Solo permitir editar si el binding es para el nombre/texto, NO para URL
+    const binding = el.dataset.mineiroBind || '';
+    const isNameBinding = binding.includes('.nombre') || binding.includes('.titulo') || 
+                          binding.includes('.text') || binding.includes('.label') ||
+                          !binding.includes('.url') && !binding.includes('.href') && !binding.includes('.link');
+    
+    if (!isNameBinding) {
+      log(`⚠️ Doble-click en enlace pero binding es URL, ignorando: ${binding}`);
+      return;
+    }
+
+    // Doble-click en nombre de enlace: abrir editor
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (selectedElement && selectedElement !== el) {
+      selectedElement.classList.remove("mineiro-selected");
+    }
+    selectedElement = el;
+    el.classList.add("mineiro-selected");
+
+    saveComputedStyles(el);
+    showEditPopup(el);
+    log(`✏️ Doble-click: Editando nombre de enlace: ${binding}`);
+  };
 
     // Para TODO lo demás (precios, títulos, textos, imágenes): ABRIR EDITOR
     e.preventDefault();
@@ -3863,38 +3903,6 @@
     log(`   → Abriendo editor para: ${el.dataset.mineiroBind}`);
   };
 
-  // DOUBLE CLICK - Solo para editar ENLACES (navegar con click simple)
-  const handleAdminDoubleClick = (e) => {
-    // Ignorar clics en popup o barra de admin
-    if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal, .mineiro-panel")) {
-      return;
-    }
-
-    const el = e.target.closest("[data-mineiro-bind]");
-    if (!el) return;
-
-    // Doble-click SOLO abre editor para ENLACES
-    const isNavigationLink = el.tagName.toLowerCase() === 'a' || el.closest('a');
-    
-    if (!isNavigationLink) {
-      // Para no-enlaces, el click simple ya abrió el editor
-      return;
-    }
-
-    // Para enlaces: doble-click abre el editor
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (selectedElement && selectedElement !== el) {
-      selectedElement.classList.remove("mineiro-selected");
-    }
-    selectedElement = el;
-    el.classList.add("mineiro-selected");
-
-    saveComputedStyles(el);
-    showEditPopup(el);
-    log(`Editando enlace: ${el.dataset.mineiroBind}`);
-  };
 
   // Hint para enlaces (doble-click para editar)
   const showLinkEditHint = (el) => {
