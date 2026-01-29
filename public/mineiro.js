@@ -1407,8 +1407,8 @@
             <input type="text" id="add-producto-nombre" placeholder="Ej: Pizza Margherita" />
           </div>
           <div class="mineiro-form-group">
-            <label>Precio</label>
-            <input type="number" id="add-producto-precio" placeholder="Ej: 9990" />
+            <label>Descripción / Ingredientes (opcional)</label>
+            <textarea id="add-producto-descripcion" placeholder="Ej: Tomate, mozzarella, albahaca fresca..." rows="2"></textarea>
           </div>
           <div class="mineiro-form-group">
             <label>Categoría</label>
@@ -1418,10 +1418,29 @@
             </select>
             ${existingCategories.length === 0 ? '<div class="mineiro-form-info" style="margin-top:8px;background:#ef4444/10;border-color:#ef4444/30;color:#fca5a5">⚠️ No hay categorías configuradas. Crea una categoría primero en la pestaña "Categoría".</div>' : ''}
           </div>
+          
+          <!-- 🆕 PRECIOS POR TAMAÑO -->
           <div class="mineiro-form-group">
-            <label>Descripción (opcional)</label>
-            <textarea id="add-producto-descripcion" placeholder="Descripción del producto..."></textarea>
+            <label>💰 Precios por tamaño</label>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">
+              <div style="text-align:center">
+                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;font-weight:600">INDIVIDUAL</div>
+                <input type="number" id="add-producto-precio-ind" placeholder="$0" style="text-align:center" />
+              </div>
+              <div style="text-align:center">
+                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;font-weight:600">FAMILIAR</div>
+                <input type="number" id="add-producto-precio-fam" placeholder="$0" style="text-align:center" />
+              </div>
+              <div style="text-align:center">
+                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;font-weight:600">XL</div>
+                <input type="number" id="add-producto-precio-xl" placeholder="$0" style="text-align:center" />
+              </div>
+            </div>
+            <div style="font-size:11px;color:#64748b;margin-top:6px;text-align:center">
+              Deja en blanco los tamaños que no aplican
+            </div>
           </div>
+          
           <div class="mineiro-form-group">
             <label>Imagen (opcional)</label>
             <div class="mineiro-image-drop" id="add-producto-image-drop">
@@ -1431,7 +1450,7 @@
           </div>
           <div class="mineiro-form-info">
             ${cardTemplateInfo.found 
-              ? `✅ Se detectó el diseño de tarjetas existente. El nuevo producto se adaptará automáticamente.`
+              ? `✅ Se detectó el diseño de tarjetas existente. El nuevo producto se clonará con el mismo estilo.`
               : `ℹ️ El producto se creará en la base de datos. Agrega un contenedor con data-mineiro-bind para mostrarlo.`
             }
           </div>
@@ -1597,219 +1616,184 @@
     
     let rendered = false;
     
-    // 🔥 ESTRATEGIA 0: Buscar CUALQUIER contenedor que tenga productos existentes
-    // Esta es la más agresiva y generalmente funciona
-    const allProductBindings = document.querySelectorAll('[data-mineiro-bind*="producto-"]');
-    log(`   Productos existentes en DOM: ${allProductBindings.length}`);
+    // 🔥 ESTRATEGIA MEJORADA: Encontrar tarjetas de producto existentes y su contenedor directo
+    // Buscamos el elemento raíz de las tarjetas (generalmente tienen estructura card con imagen/nombre/precio)
     
-    if (allProductBindings.length > 0 && !rendered) {
-      // Encontrar todos los contenedores únicos de productos
-      const containersSet = new Set();
-      allProductBindings.forEach(el => {
-        // Subir en el DOM para encontrar el contenedor
-        let parent = el.parentElement;
-        while (parent && parent !== document.body) {
-          // Buscar un contenedor que parezca un grid o lista
-          if (parent.children.length >= 1) {
-            const hasProducts = parent.querySelector('[data-mineiro-bind*="producto-"]');
-            if (hasProducts) {
-              containersSet.add(parent);
-            }
-          }
-          parent = parent.parentElement;
-        }
-      });
+    /**
+     * Función para encontrar el contenedor scroll/flex que contiene las tarjetas
+     * Este es el contenedor DIRECTO de las tarjetas, no un padre superior
+     */
+    const findCardContainer = () => {
+      // Buscar todas las tarjetas de producto existentes (elementos con bindings de producto)
+      const productBindings = document.querySelectorAll('[data-mineiro-bind*="producto-"][data-mineiro-bind*=".nombre"]');
       
-      log(`   Contenedores de productos encontrados: ${containersSet.size}`);
-      
-      // Filtrar para encontrar el contenedor correcto por categoría
-      for (const container of containersSet) {
-        // Ver si este contenedor tiene productos de la categoría correcta
-        const productosEnContainer = container.querySelectorAll('[data-mineiro-bind*="producto-"]');
-        
-        // Si no hay categoría específica O el contenedor tiene productos de cualquier categoría, usar este
-        if (!categoriaOriginal || productosEnContainer.length > 0) {
-          // Verificar si la categoría coincide por el texto
-          let categoriaCoincide = !categoriaOriginal; // Si no hay categoría, cualquier contenedor sirve
-          
-          if (categoriaOriginal) {
-            // Buscar si algún producto en este contenedor tiene la misma categoría
-            const textoContainer = container.textContent?.toLowerCase() || '';
-            if (textoContainer.includes(categoriaOriginal)) {
-              categoriaCoincide = true;
-            }
-            
-            // También buscar en headings cercanos
-            const heading = container.closest('section, [class*="section"]')?.querySelector('h1, h2, h3, h4, h5, h6');
-            if (heading && heading.textContent?.toLowerCase().includes(categoriaOriginal)) {
-              categoriaCoincide = true;
-            }
-          }
-          
-          if (categoriaCoincide && !container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
-            const card = createProductCard(producto, container);
-            if (card) {
-              container.appendChild(card);
-              rendered = true;
-              log(`   ✓ Renderizado en contenedor de productos existente`);
-              break;
-            }
-          }
-        }
+      if (productBindings.length === 0) {
+        log(`   No se encontraron productos con binding .nombre`);
+        return null;
       }
       
-      // Si no encontró por categoría, usar el primer contenedor disponible
-      if (!rendered && containersSet.size > 0) {
-        const firstContainer = Array.from(containersSet)[0];
-        if (!firstContainer.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
-          const card = createProductCard(producto, firstContainer);
-          if (card) {
-            firstContainer.appendChild(card);
-            rendered = true;
-            log(`   ✓ Renderizado en primer contenedor disponible (sin match de categoría)`);
-          }
-        }
-      }
-    }
-    
-    // Estrategia 1: Buscar contenedores con data-mineiro-section
-    if (!rendered) {
-      const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
-      log(`   Secciones encontradas: ${sectionContainers.length}`);
-      sectionContainers.forEach(container => {
-        if (rendered) return;
-        const sectionName = container.dataset.mineiroSection?.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        const sectionOriginal = container.dataset.mineiroSection?.toLowerCase().trim() || '';
-        
-        if (sectionName === categoria || sectionOriginal === categoriaOriginal || 
-            sectionName === 'todos' || sectionName === 'all' || !categoria) {
-          const card = createProductCard(producto, container);
-          container.appendChild(card);
-          rendered = true;
-          log(`   ✓ Renderizado en sección: ${sectionOriginal}`);
-        }
-      });
-    }
-    
-    // Estrategia 2: Buscar contenedores con data-mineiro-category o data-category
-    if (!rendered) {
-      const categorySelectors = [
-        `[data-mineiro-category="${categoria}"]`,
-        `[data-mineiro-category="${categoriaOriginal}"]`,
-        `[data-mineiro-categoria="${categoria}"]`,
-        `[data-mineiro-categoria="${categoriaOriginal}"]`,
-        `[data-category="${categoria}"]`,
-        `[data-category="${categoriaOriginal}"]`
-      ];
+      log(`   Encontrados ${productBindings.length} elementos con binding .nombre`);
       
-      for (const selector of categorySelectors) {
-        const containers = document.querySelectorAll(selector);
-        containers.forEach(container => {
-          if (!rendered) {
-            const card = createProductCard(producto, container);
-            container.appendChild(card);
-            rendered = true;
-            log(`   ✓ Renderizado con selector: ${selector}`);
-          }
-        });
-        if (rendered) break;
-      }
-    }
-    
-    // Estrategia 3: Buscar secciones por texto del heading
-    if (!rendered && categoriaOriginal) {
-      const allSections = document.querySelectorAll('section, [class*="section"], [class*="category"], [class*="categoria"]');
-      log(`   Buscando por heading en ${allSections.length} secciones...`);
+      // Para cada binding, subir hasta encontrar el elemento tarjeta (card)
+      const cardsFound = [];
       
-      for (const section of allSections) {
-        const heading = section.querySelector('h1, h2, h3, h4, h5, h6, [class*="title"], [class*="heading"]');
-        if (heading) {
-          const headingText = heading.textContent?.toLowerCase().trim() || '';
-          if (headingText.includes(categoriaOriginal) || categoriaOriginal.includes(headingText)) {
-            // Buscar un grid o contenedor de productos dentro
-            const grid = section.querySelector('[class*="grid"], [class*="products"], [class*="items"], [class*="menu"], .productos');
-            const container = grid || section;
-            const card = createProductCard(producto, container);
-            container.appendChild(card);
-            rendered = true;
-            log(`   ✓ Renderizado bajo heading: "${headingText}"`);
-            break;
-          }
-        }
-      }
-    }
-    
-    // Estrategia 4: Buscar contenedores que ya tengan productos de la misma categoría
-    if (!rendered && categoriaOriginal) {
-      // Buscar productos existentes con la misma categoría en su binding
-      const existingCatBindings = document.querySelectorAll('[data-mineiro-bind*=".categoria"]');
-      log(`   Bindings de categoría encontrados: ${existingCatBindings.length}`);
-      
-      for (const catEl of existingCatBindings) {
-        const catText = catEl.textContent?.toLowerCase().trim() || '';
-        if (catText.includes(categoriaOriginal) || categoriaOriginal.includes(catText)) {
-          // Encontrar el contenedor padre que tenga el grid de productos
-          let container = catEl.closest('[class*="grid"], [class*="products"], [class*="items"], section');
-          if (!container) {
-            // Subir hasta encontrar un contenedor con varios hijos
-            container = catEl.parentElement;
-            let attempts = 0;
-            while (container && container.children.length < 3 && attempts < 6) {
-              container = container.parentElement;
-              attempts++;
-            }
-          }
-          
-          if (container && container !== document.body && !container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
-            const card = createProductCard(producto, container);
-            container.appendChild(card);
-            rendered = true;
-            log(`   ✓ Renderizado junto a productos de misma categoría`);
-            break;
-          }
-        }
-      }
-    }
-    
-    // Estrategia 5: Buscar cualquier grid o contenedor genérico de productos
-    if (!rendered) {
-      const genericSelectors = [
-        '.products-grid', '.menu-items', '.productos', '.products',
-        '[class*="product-list"]', '[class*="menu-grid"]', '[class*="product-grid"]',
-        '.grid', '[class*="items-container"]'
-      ];
-      
-      for (const selector of genericSelectors) {
-        const containers = document.querySelectorAll(selector);
-        if (containers.length > 0) {
-          const container = containers[0];
-          if (!container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
-            const card = createProductCard(producto, container);
-            container.appendChild(card);
-            rendered = true;
-            log(`   ✓ Renderizado en contenedor genérico: ${selector}`);
-            break;
-          }
-        }
-      }
-    }
-    
-    // Estrategia 6: Buscar el padre de cualquier producto existente
-    if (!rendered) {
-      const anyProduct = document.querySelector('[data-mineiro-bind*="producto-"]');
-      if (anyProduct) {
-        let container = anyProduct.parentElement;
+      for (const nombreEl of productBindings) {
+        // Subir hasta encontrar el elemento que parece ser una tarjeta completa
+        let card = nombreEl;
         let attempts = 0;
-        while (container && container.children.length < 2 && attempts < 5) {
-          container = container.parentElement;
+        
+        while (card && attempts < 10) {
+          // Características de una tarjeta de producto:
+          // - Tiene ancho definido (min-w-*, w-*, flex-shrink-0, etc.)
+          // - Contiene múltiples bindings (nombre, precio, imagen)
+          // - NO es section, main, body
+          // - Generalmente tiene classes como rounded, shadow, card, etc.
+          
+          const cardTag = card.tagName?.toLowerCase();
+          const cardClass = card.className || '';
+          
+          // Excluir elementos estructurales
+          if (['section', 'main', 'body', 'html', 'header', 'footer', 'nav'].includes(cardTag)) {
+            break;
+          }
+          
+          // Detectar si es una tarjeta por sus características
+          const hasWidthClass = /min-w-|w-\[|w-\d|flex-shrink-0|snap-start/.test(cardClass);
+          const hasCardClass = /card|rounded|shadow|border|overflow-hidden|bg-white|bg-\w+\//.test(cardClass);
+          const hasMultipleBindings = card.querySelectorAll('[data-mineiro-bind*="producto-"]').length >= 2;
+          const isReasonableSize = card.querySelectorAll('*').length >= 3 && card.querySelectorAll('*').length <= 80;
+          
+          if ((hasWidthClass || hasCardClass) && hasMultipleBindings && isReasonableSize) {
+            cardsFound.push(card);
+            break;
+          }
+          
+          card = card.parentElement;
           attempts++;
         }
+      }
+      
+      log(`   Tarjetas encontradas: ${cardsFound.length}`);
+      
+      if (cardsFound.length === 0) {
+        return null;
+      }
+      
+      // Encontrar el contenedor común de las tarjetas
+      // Es el padre directo que contiene múltiples tarjetas
+      const firstCard = cardsFound[0];
+      let container = firstCard.parentElement;
+      
+      // El contenedor debe:
+      // - Tener múltiples hijos (las tarjetas)
+      // - Ser un flex/grid container
+      // - No ser section/main/body
+      
+      while (container && container !== document.body) {
+        const containerTag = container.tagName?.toLowerCase();
+        const containerClass = container.className || '';
         
-        if (container && container !== document.body && !container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
-          const card = createProductCard(producto, container);
-          container.appendChild(card);
-          rendered = true;
-          log(`   ✓ Renderizado en contenedor de producto existente`);
+        // Excluir elementos estructurales
+        if (['section', 'main', 'body', 'html'].includes(containerTag)) {
+          // Retroceder al último contenedor válido
+          container = firstCard.parentElement;
+          break;
+        }
+        
+        // Detectar si es el contenedor de cards
+        const hasFlexOrGrid = /flex|grid|overflow-x|snap-x/.test(containerClass);
+        const hasMultipleCards = container.children.length >= 1;
+        const cardChildrenCount = Array.from(container.children).filter(child => {
+          const childClass = child.className || '';
+          return /min-w-|snap-start|card|rounded/.test(childClass) || 
+                 child.querySelector('[data-mineiro-bind*="producto-"]');
+        }).length;
+        
+        if (hasFlexOrGrid && cardChildrenCount >= 1) {
+          log(`   ✅ Contenedor encontrado: ${containerClass.slice(0, 60)}...`);
+          return { container, referenceCard: firstCard };
+        }
+        
+        container = container.parentElement;
+      }
+      
+      // Fallback: usar el padre directo de la primera tarjeta
+      return { container: firstCard.parentElement, referenceCard: firstCard };
+    };
+    
+    // Intentar encontrar contenedor específico por categoría primero
+    const findCategoryContainer = () => {
+      if (!categoriaOriginal) return null;
+      
+      // Buscar secciones con headings que coincidan con la categoría
+      const allSections = document.querySelectorAll('section, [class*="section"]');
+      
+      for (const section of allSections) {
+        const heading = section.querySelector('h1, h2, h3, h4, h5, h6');
+        if (heading) {
+          const headingText = heading.textContent?.toLowerCase().trim() || '';
+          if (headingText.includes(categoriaOriginal) || categoriaOriginal.includes(headingText.split(' ')[0])) {
+            // Encontrar el contenedor de tarjetas dentro de esta sección
+            const productInSection = section.querySelector('[data-mineiro-bind*="producto-"]');
+            if (productInSection) {
+              // Subir hasta encontrar la tarjeta
+              let card = productInSection;
+              let attempts = 0;
+              while (card && card !== section && attempts < 8) {
+                const cardClass = card.className || '';
+                if (/min-w-|snap-start|rounded|card/.test(cardClass)) {
+                  return { container: card.parentElement, referenceCard: card };
+                }
+                card = card.parentElement;
+                attempts++;
+              }
+            }
+          }
+        }
+      }
+      
+      return null;
+    };
+    
+    // Primero intentar por categoría
+    let containerInfo = findCategoryContainer();
+    
+    // Si no, buscar cualquier contenedor de tarjetas
+    if (!containerInfo) {
+      containerInfo = findCardContainer();
+    }
+    
+    if (containerInfo && containerInfo.container) {
+      const { container, referenceCard } = containerInfo;
+      
+      // Clonar la tarjeta de referencia para mantener el mismo estilo
+      const card = createProductCard(producto, container);
+      
+      if (card) {
+        // Insertar después de la última tarjeta o al final del contenedor
+        container.appendChild(card);
+        rendered = true;
+        log(`   ✅ Producto renderizado en contenedor de tarjetas`);
+      }
+    }
+    
+    // Estrategia de fallback 1: Buscar contenedores con data-mineiro-section
+    if (!rendered) {
+      const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
+      if (sectionContainers.length > 0) {
+        log(`   Fallback: Buscando en ${sectionContainers.length} secciones marcadas...`);
+        for (const container of sectionContainers) {
+          const sectionName = container.dataset.mineiroSection?.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+          const sectionOriginal = container.dataset.mineiroSection?.toLowerCase().trim() || '';
+          
+          if (sectionName === categoria || sectionOriginal === categoriaOriginal || 
+              sectionName === 'todos' || sectionName === 'all' || !categoria) {
+            const card = createProductCard(producto, container);
+            container.appendChild(card);
+            rendered = true;
+            log(`   ✓ Renderizado en sección marcada: ${sectionOriginal}`);
+            break;
+          }
         }
       }
     }
@@ -2017,12 +2001,39 @@
           nombreEl.dataset.mineiroBind = `producto-${domId}.nombre`;
         }
         
-        // Buscar y actualizar precio
-        const precioEl = clonedCard.querySelector('[data-mineiro-bind*=".precio"]') 
-                      || clonedCard.querySelector('.price, .precio, [class*="price"], [class*="precio"]');
-        if (precioEl) {
-          precioEl.textContent = precio;
-          precioEl.dataset.mineiroBind = `producto-${domId}.precio`;
+        // Buscar y actualizar precio - MEJORADO para soportar precios por tamaño
+        const precios = producto.configuracion?.precios || {};
+        const tienePreciosPorTamano = precios.ind || precios.fam || precios.xl;
+        
+        // Buscar elementos de precio por tamaño (IND, FAM, XL)
+        const precioIndEl = clonedCard.querySelector('[data-mineiro-bind*=".precio.ind"]');
+        const precioFamEl = clonedCard.querySelector('[data-mineiro-bind*=".precio.fam"]');
+        const precioXlEl = clonedCard.querySelector('[data-mineiro-bind*=".precio.xl"]');
+        
+        if (precioIndEl || precioFamEl || precioXlEl) {
+          // La tarjeta tiene estructura de precios por tamaño
+          log(`   📊 Tarjeta con precios por tamaño detectada`);
+          
+          if (precioIndEl) {
+            precioIndEl.textContent = precios.ind ? `$${precios.ind.toLocaleString()}` : '-';
+            precioIndEl.dataset.mineiroBind = `producto-${domId}.precio.ind`;
+          }
+          if (precioFamEl) {
+            precioFamEl.textContent = precios.fam ? `$${precios.fam.toLocaleString()}` : '-';
+            precioFamEl.dataset.mineiroBind = `producto-${domId}.precio.fam`;
+          }
+          if (precioXlEl) {
+            precioXlEl.textContent = precios.xl ? `$${precios.xl.toLocaleString()}` : '-';
+            precioXlEl.dataset.mineiroBind = `producto-${domId}.precio.xl`;
+          }
+        } else {
+          // Tarjeta con precio único - usar el primer precio disponible
+          const precioEl = clonedCard.querySelector('[data-mineiro-bind*=".precio"]') 
+                        || clonedCard.querySelector('.price, .precio, [class*="price"], [class*="precio"]');
+          if (precioEl) {
+            precioEl.textContent = precio;
+            precioEl.dataset.mineiroBind = `producto-${domId}.precio`;
+          }
         }
         
         // Buscar y actualizar descripción
@@ -2076,6 +2087,38 @@
     const cardBg = siteStyle.isDark ? '#1e293b' : '#ffffff';
     const borderColor = siteStyle.isDark ? '#334155' : '#e2e8f0';
     
+    // Obtener precios por tamaño si existen
+    const precios = producto.configuracion?.precios || {};
+    const tienePreciosPorTamano = precios.ind || precios.fam || precios.xl;
+    
+    // Generar HTML de precios según la estructura
+    let preciosHtml = '';
+    if (tienePreciosPorTamano) {
+      preciosHtml = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          ${precios.ind ? `<div style="text-align:center;padding:4px 8px;background:${siteStyle.isDark ? '#374151' : '#f3f4f6'};border-radius:6px">
+            <div style="font-size:10px;color:${siteStyle.subtextColor}">IND</div>
+            <div data-mineiro-bind="producto-${domId}.precio.ind" style="font-size:14px;font-weight:600;color:${siteStyle.accentColor}">$${precios.ind.toLocaleString()}</div>
+          </div>` : ''}
+          ${precios.fam ? `<div style="text-align:center;padding:4px 8px;background:${siteStyle.isDark ? '#374151' : '#f3f4f6'};border-radius:6px">
+            <div style="font-size:10px;color:${siteStyle.subtextColor}">FAM</div>
+            <div data-mineiro-bind="producto-${domId}.precio.fam" style="font-size:14px;font-weight:600;color:${siteStyle.accentColor}">$${precios.fam.toLocaleString()}</div>
+          </div>` : ''}
+          ${precios.xl ? `<div style="text-align:center;padding:4px 8px;background:${siteStyle.isDark ? '#374151' : '#f3f4f6'};border-radius:6px">
+            <div style="font-size:10px;color:${siteStyle.subtextColor}">XL</div>
+            <div data-mineiro-bind="producto-${domId}.precio.xl" style="font-size:14px;font-weight:600;color:${siteStyle.accentColor}">$${precios.xl.toLocaleString()}</div>
+          </div>` : ''}
+        </div>
+      `;
+    } else {
+      preciosHtml = `
+        <div 
+          data-mineiro-bind="producto-${domId}.precio"
+          style="font-size:20px;font-weight:700;color:${siteStyle.accentColor}"
+        >${precio}</div>
+      `;
+    }
+    
     card.innerHTML = `
       <div style="background:${cardBg};border-radius:12px;overflow:hidden;border:1px solid ${borderColor};transition:transform 0.2s">
         ${producto.imagen_url ? `
@@ -2104,10 +2147,7 @@
               style="font-size:13px;color:${siteStyle.subtextColor};margin:0 0 12px 0"
             >${producto.descripcion}</p>
           ` : ''}
-          <div 
-            data-mineiro-bind="producto-${domId}.precio"
-            style="font-size:20px;font-weight:700;color:${siteStyle.accentColor}"
-          >${precio}</div>
+          ${preciosHtml}
         </div>
       </div>
     `;
@@ -2125,26 +2165,36 @@
 
   const createNewProduct = async () => {
     const nombre = document.getElementById('add-producto-nombre').value.trim();
-    const precioRaw = parseFloat(document.getElementById('add-producto-precio').value) || 0;
     const catSelect = document.getElementById('add-producto-categoria');
     const descripcion = document.getElementById('add-producto-descripcion').value.trim();
     const imageDrop = document.getElementById('add-producto-image-drop');
     const imagenUrl = imageDrop?.dataset?.imageUrl || '';
+    
+    // 🆕 Precios por tamaño
+    const precioIndRaw = parseFloat(document.getElementById('add-producto-precio-ind')?.value) || 0;
+    const precioFamRaw = parseFloat(document.getElementById('add-producto-precio-fam')?.value) || 0;
+    const precioXlRaw = parseFloat(document.getElementById('add-producto-precio-xl')?.value) || 0;
 
     // Validar precio máximo (límite de INTEGER en PostgreSQL)
     const MAX_PRECIO = 2147483647;
-    const precio = Math.min(Math.floor(precioRaw), MAX_PRECIO);
+    const precioInd = Math.min(Math.floor(precioIndRaw), MAX_PRECIO);
+    const precioFam = Math.min(Math.floor(precioFamRaw), MAX_PRECIO);
+    const precioXl = Math.min(Math.floor(precioXlRaw), MAX_PRECIO);
     
-    if (precioRaw > MAX_PRECIO) {
-      alert(`El precio es demasiado grande. Máximo permitido: $${MAX_PRECIO.toLocaleString()}`);
-      return;
-    }
+    // Precio principal = el primer precio disponible (prioridad: fam > ind > xl)
+    const precioPrincipal = precioFam || precioInd || precioXl || 0;
 
     let categoria = catSelect?.value || '';
 
     if (!nombre) {
       alert('El nombre del producto es requerido');
       return;
+    }
+    
+    if (precioInd === 0 && precioFam === 0 && precioXl === 0) {
+      if (!confirm('No has ingresado ningún precio. ¿Deseas continuar con precios en $0?')) {
+        return;
+      }
     }
 
     if (!tiendaData?.id) {
@@ -2170,16 +2220,27 @@
         domId = `${baseDomId}-${Date.now().toString(36)}`;
       }
 
+      // 🆕 Estructura de precios por tamaño
+      const precios = {};
+      if (precioInd > 0) precios.ind = precioInd;
+      if (precioFam > 0) precios.fam = precioFam;
+      if (precioXl > 0) precios.xl = precioXl;
+
       const productoData = {
         tienda_id: tiendaData.id,
         user_id: tiendaData.user_id || null,
         nombre,
-        precio,
+        precio: precioPrincipal,
         categoria: categoria || null,
         descripcion: descripcion || null,
         imagen_url: imagenUrl || null,
         dom_id: domId,
-        visible: true
+        visible: true,
+        // 🆕 Guardar precios por tamaño en configuracion
+        configuracion: {
+          precios: precios,
+          ingredientes: descripcion || null
+        }
       };
 
       log('Creando producto:', productoData);
@@ -2216,8 +2277,15 @@
         // Limpiar form
         setTimeout(() => {
           document.getElementById('add-producto-nombre').value = '';
-          document.getElementById('add-producto-precio').value = '';
           document.getElementById('add-producto-descripcion').value = '';
+          // 🆕 Limpiar precios por tamaño
+          const precioIndInput = document.getElementById('add-producto-precio-ind');
+          const precioFamInput = document.getElementById('add-producto-precio-fam');
+          const precioXlInput = document.getElementById('add-producto-precio-xl');
+          if (precioIndInput) precioIndInput.value = '';
+          if (precioFamInput) precioFamInput.value = '';
+          if (precioXlInput) precioXlInput.value = '';
+          
           if (catSelect) catSelect.value = '';
           if (imageDrop) {
             imageDrop.innerHTML = '<div class="mineiro-drop-hint">📷 Arrastra una imagen o haz clic para seleccionar</div><input type="file" accept="image/*" style="display:none" />';
