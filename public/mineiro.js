@@ -429,8 +429,20 @@
     return true;
   };
 
+  // 🔒 Map para guardar valores editados localmente (no se sobreescriben por polling)
+  const localEdits = new Map(); // binding -> { value, timestamp }
+  const LOCAL_EDIT_PROTECTION_MS = 30000; // Proteger ediciones locales por 30 segundos
+
   const hydrateElement = (el, tienda, productos, testimonios) => {
     const binding = el.dataset.mineiroBind;
+    
+    // 🔒 VERIFICAR SI HAY UNA EDICIÓN LOCAL RECIENTE
+    // Si el usuario editó este elemento hace menos de 30 segundos, NO re-hidratar
+    const localEdit = localEdits.get(binding);
+    if (localEdit && (Date.now() - localEdit.timestamp) < LOCAL_EDIT_PROTECTION_MS) {
+      log(`🔒 Elemento con edición local reciente, NO se hidrata: ${binding}`);
+      return;
+    }
     
     // TRIPLE verificación para no hidratar elementos preservados:
     // 1. Está en el Set de elementos preservados
@@ -750,9 +762,17 @@
   };
 
   // Forzar re-hidratación completa (quitar atributo hydrated)
-  // IMPORTANTE: No re-hidratar elementos que el usuario restauró a original
+  // IMPORTANTE: No re-hidratar elementos que el usuario restauró a original NI ediciones locales recientes
   const forceRehydrateAll = () => {
     document.querySelectorAll("[data-mineiro-bind][data-mineiro-hydrated]").forEach(el => {
+      const binding = el.dataset.mineiroBind;
+      
+      // 🔒 No tocar elementos con edición local reciente
+      const localEdit = localEdits.get(binding);
+      if (localEdit && (Date.now() - localEdit.timestamp) < LOCAL_EDIT_PROTECTION_MS) {
+        return; // Proteger edición local
+      }
+      
       // No tocar elementos preservados por el usuario
       if (!preservedOriginalElements.has(el) && el.dataset.mineiroPreserved !== 'true') {
         el.removeAttribute("data-mineiro-hydrated");
@@ -1322,23 +1342,107 @@
     
     log(`🎯 Renderizando producto: "${producto.nombre}" | Categoría: "${categoriaOriginal}" | dom_id: ${domId}`);
     
+    // Verificar si ya existe
+    if (document.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
+      log(`   ⚠️ Producto ya existe en el DOM, saltando`);
+      return true;
+    }
+    
     let rendered = false;
     
-    // Estrategia 1: Buscar contenedores con data-mineiro-section
-    const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
-    log(`   Secciones encontradas: ${sectionContainers.length}`);
-    sectionContainers.forEach(container => {
-      const sectionName = container.dataset.mineiroSection?.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      const sectionOriginal = container.dataset.mineiroSection?.toLowerCase().trim() || '';
+    // 🔥 ESTRATEGIA 0: Buscar CUALQUIER contenedor que tenga productos existentes
+    // Esta es la más agresiva y generalmente funciona
+    const allProductBindings = document.querySelectorAll('[data-mineiro-bind*="producto-"]');
+    log(`   Productos existentes en DOM: ${allProductBindings.length}`);
+    
+    if (allProductBindings.length > 0 && !rendered) {
+      // Encontrar todos los contenedores únicos de productos
+      const containersSet = new Set();
+      allProductBindings.forEach(el => {
+        // Subir en el DOM para encontrar el contenedor
+        let parent = el.parentElement;
+        while (parent && parent !== document.body) {
+          // Buscar un contenedor que parezca un grid o lista
+          if (parent.children.length >= 1) {
+            const hasProducts = parent.querySelector('[data-mineiro-bind*="producto-"]');
+            if (hasProducts) {
+              containersSet.add(parent);
+            }
+          }
+          parent = parent.parentElement;
+        }
+      });
       
-      if (sectionName === categoria || sectionOriginal === categoriaOriginal || 
-          sectionName === 'todos' || sectionName === 'all' || !categoria) {
-        const card = createProductCard(producto, container);
-        container.appendChild(card);
-        rendered = true;
-        log(`   ✓ Renderizado en sección: ${sectionOriginal}`);
+      log(`   Contenedores de productos encontrados: ${containersSet.size}`);
+      
+      // Filtrar para encontrar el contenedor correcto por categoría
+      for (const container of containersSet) {
+        // Ver si este contenedor tiene productos de la categoría correcta
+        const productosEnContainer = container.querySelectorAll('[data-mineiro-bind*="producto-"]');
+        
+        // Si no hay categoría específica O el contenedor tiene productos de cualquier categoría, usar este
+        if (!categoriaOriginal || productosEnContainer.length > 0) {
+          // Verificar si la categoría coincide por el texto
+          let categoriaCoincide = !categoriaOriginal; // Si no hay categoría, cualquier contenedor sirve
+          
+          if (categoriaOriginal) {
+            // Buscar si algún producto en este contenedor tiene la misma categoría
+            const textoContainer = container.textContent?.toLowerCase() || '';
+            if (textoContainer.includes(categoriaOriginal)) {
+              categoriaCoincide = true;
+            }
+            
+            // También buscar en headings cercanos
+            const heading = container.closest('section, [class*="section"]')?.querySelector('h1, h2, h3, h4, h5, h6');
+            if (heading && heading.textContent?.toLowerCase().includes(categoriaOriginal)) {
+              categoriaCoincide = true;
+            }
+          }
+          
+          if (categoriaCoincide && !container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
+            const card = createProductCard(producto, container);
+            if (card) {
+              container.appendChild(card);
+              rendered = true;
+              log(`   ✓ Renderizado en contenedor de productos existente`);
+              break;
+            }
+          }
+        }
       }
-    });
+      
+      // Si no encontró por categoría, usar el primer contenedor disponible
+      if (!rendered && containersSet.size > 0) {
+        const firstContainer = Array.from(containersSet)[0];
+        if (!firstContainer.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
+          const card = createProductCard(producto, firstContainer);
+          if (card) {
+            firstContainer.appendChild(card);
+            rendered = true;
+            log(`   ✓ Renderizado en primer contenedor disponible (sin match de categoría)`);
+          }
+        }
+      }
+    }
+    
+    // Estrategia 1: Buscar contenedores con data-mineiro-section
+    if (!rendered) {
+      const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
+      log(`   Secciones encontradas: ${sectionContainers.length}`);
+      sectionContainers.forEach(container => {
+        if (rendered) return;
+        const sectionName = container.dataset.mineiroSection?.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const sectionOriginal = container.dataset.mineiroSection?.toLowerCase().trim() || '';
+        
+        if (sectionName === categoria || sectionOriginal === categoriaOriginal || 
+            sectionName === 'todos' || sectionName === 'all' || !categoria) {
+          const card = createProductCard(producto, container);
+          container.appendChild(card);
+          rendered = true;
+          log(`   ✓ Renderizado en sección: ${sectionOriginal}`);
+        }
+      });
+    }
     
     // Estrategia 2: Buscar contenedores con data-mineiro-category o data-category
     if (!rendered) {
@@ -3709,29 +3813,38 @@
       return;
     }
 
-    // Verificar si es un enlace de navegación (categorías del menú)
-    // Un enlace es: el propio elemento es <a> O está dentro de un <a>
+    // 🔗 DETECTAR SI ES UN ENLACE DE NAVEGACIÓN
+    // Un enlace es: el propio elemento es <a> O está dentro de un <a> O tiene href
     const linkAncestor = el.closest('a');
-    const isNavigationLink = el.tagName.toLowerCase() === 'a' || linkAncestor;
+    const isLink = el.tagName.toLowerCase() === 'a';
+    const hasHref = el.hasAttribute('href') || linkAncestor?.hasAttribute('href');
+    const isNavigationLink = isLink || (linkAncestor && hasHref);
+    
+    // También detectar botones de navegación
+    const isNavButton = el.closest('nav, .nav, .menu, .navbar, [role="navigation"]');
+    const looksLikeNavLink = isNavigationLink || (isNavButton && (isLink || linkAncestor));
     
     // Debug para ver qué está pasando
-    log(`🖱️ Click en: ${el.tagName} | binding: ${el.dataset.mineiroBind} | esEnlace: ${isNavigationLink}`);
+    log(`🖱️ Click en: ${el.tagName} | binding: ${el.dataset.mineiroBind} | esEnlace: ${looksLikeNavLink}`);
     
-    if (isNavigationLink) {
+    if (looksLikeNavLink) {
       // Para enlaces: solo resaltar, NO abrir editor (requiere doble-click)
+      // NO bloquear el evento - permitir navegación normal
+      
       if (selectedElement && selectedElement !== el) {
         selectedElement.classList.remove("mineiro-selected");
       }
       selectedElement = el;
       el.classList.add("mineiro-selected");
       
-      // Mostrar hint de doble-click para editar enlaces
+      // Mostrar hint de doble-click para editar enlaces (solo una vez)
       if (!el.dataset.mineiroHintShown) {
         el.dataset.mineiroHintShown = 'true';
         showLinkEditHint(el);
       }
-      // NO bloquear - permitir navegación normal
+      
       log(`   → Enlace detectado, permitiendo navegación. Doble-click para editar.`);
+      // NO llamar preventDefault() ni stopPropagation() - dejar que el navegador maneje el click
       return;
     }
 
@@ -4719,6 +4832,16 @@
       
       // 🔄 SINCRONIZAR TODOS LOS ELEMENTOS CON EL MISMO BINDING
       const currentBinding = binding || el.dataset.mineiroBind;
+      
+      // 🔐 REGISTRAR EDICIÓN LOCAL PARA PROTEGER DEL POLLING
+      if (currentBinding) {
+        localEdits.set(currentBinding, {
+          value: valueForAPI,
+          timestamp: Date.now()
+        });
+        log(`🔐 Edición local registrada: ${currentBinding} (protegida por 30s)`);
+      }
+      
       if (currentBinding) {
         document.querySelectorAll(`[data-mineiro-bind="${currentBinding}"]`).forEach(otherEl => {
           if (otherEl !== el) {
