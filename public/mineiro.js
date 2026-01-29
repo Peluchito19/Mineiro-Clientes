@@ -396,7 +396,7 @@
     keysToRemove.forEach(key => localStorage.removeItem(key));
     log(`   ✓ Limpiados ${keysToRemove.length} items de localStorage`);
     
-    // 2. Limpiar site_config.productos Y config.menu en la base de datos
+    // 2. Limpiar site_config.productos, config.menu Y TODOS los precios guardados
     if (tiendaData?.id && tiendaData?.site_config) {
       try {
         const newSiteConfig = JSON.parse(JSON.stringify(tiendaData.site_config));
@@ -443,6 +443,39 @@
   
   // Exponer función globalmente para poder usarla desde consola
   window.clearAllMineiroData = clearAllMineiroData;
+  
+  // 🔍 FUNCIÓN DE DIAGNÓSTICO: Ver qué hay en site_config
+  const diagnoseSiteConfig = () => {
+    console.group('🔍 DIAGNÓSTICO DE SITE_CONFIG');
+    console.log('tiendaData.id:', tiendaData?.id);
+    console.log('site_config completo:', JSON.stringify(tiendaData?.site_config, null, 2));
+    
+    if (tiendaData?.site_config?.productos) {
+      console.log('📦 site_config.productos:', JSON.stringify(tiendaData.site_config.productos, null, 2));
+    } else {
+      console.log('📦 site_config.productos: VACÍO');
+    }
+    
+    if (tiendaData?.site_config?.config?.menu) {
+      console.log('🍕 site_config.config.menu:', JSON.stringify(tiendaData.site_config.config.menu, null, 2));
+    } else {
+      console.log('🍕 site_config.config.menu: VACÍO');
+    }
+    
+    console.log('🛒 productosCache:', productosCache.length, 'productos');
+    productosCache.forEach(p => {
+      console.log(`   - ${p.nombre} (dom_id: ${p.dom_id}, precio: ${p.precio})`);
+    });
+    
+    console.groupEnd();
+    return {
+      productos: tiendaData?.site_config?.productos,
+      menu: tiendaData?.site_config?.config?.menu,
+      cache: productosCache
+    };
+  };
+  
+  window.diagnoseSiteConfig = diagnoseSiteConfig;
   
   // Set de bindings que fueron preservados (persiste entre recargas)
   const preservedBindingsSet = loadPreservedBindings();
@@ -585,21 +618,21 @@
       }
 
       case "producto": {
-        // 🎯 PRIORIDAD DE LECTURA (de mayor a menor prioridad):
-        // 1. site_config.productos (ediciones del usuario) - SIEMPRE PRIMERO
-        // 2. site_config.config.menu (ediciones por categoría)
-        // 3. Producto en base de datos (valores originales)
+        // 🎯 IMPORTANTE: Solo aplicar valores que el usuario haya editado explícitamente
+        // El HTML ya tiene los precios correctos, NO debemos sobrescribirlos con valores de BD
         
-        // 🥇 PRIMERO: Buscar en site_config.productos (donde se guardan las ediciones del usuario)
+        // 🥇 ÚNICO: Buscar en site_config.productos (donde se guardan las ediciones del usuario)
         value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
         
-        // 🥈 SEGUNDO: Buscar en config.menu.{categoria}.{producto}.{campo}
+        // 🥈 Fallback: Buscar en config.menu.{categoria}.{producto}.{campo}
         if (value === undefined && parsed.categoria) {
           value = getNestedValue(siteConfig, `config.menu.${parsed.categoria}.${parsed.identifier}.${parsed.field}`);
         }
         
-        // 🥉 TERCERO: Solo si no hay valor editado, buscar en productos de BD
-        if (value === undefined) {
+        // ⚠️ NO buscar en productos de BD para precios
+        // El HTML ya tiene los precios correctos del diseño
+        // Solo usar BD para campos que NO son precio y que el usuario no haya editado
+        if (value === undefined && !parsed.field.includes('precio')) {
           const searchId = parsed.identifier.toLowerCase();
           let producto = productos.find(p => p.dom_id === parsed.identifier)
                       || productos.find(p => String(p.id) === parsed.identifier)
@@ -608,33 +641,8 @@
                       || productos.find(p => p.nombre?.toLowerCase().includes(searchId.replace(/-/g, ' ')));
           
           if (producto) {
-            // 🎯 El campo puede ser "precio.fam", "precio.ind", "nombre", etc.
             if (parsed.field.includes(".")) {
-              // Campo anidado: precio.fam -> producto.precio.fam o producto.configuracion.precios.fam
               value = getNestedValue(producto, parsed.field);
-              
-              // Si no se encuentra, buscar en configuracion.precios
-              if (value === undefined && parsed.field.startsWith("precio.")) {
-                const tamano = parsed.field.split(".")[1]; // "fam", "ind", "xl"
-                value = getNestedValue(producto, `configuracion.precios.${tamano}`);
-              }
-              
-              // Si aún no se encuentra, intentar buscar variantes
-              if (value === undefined && parsed.field.startsWith("precio.")) {
-                const tamano = parsed.field.split(".")[1];
-                const variantes = producto.configuracion?.variantes || [];
-                const variante = variantes.find(v => 
-                  v.nombre?.toLowerCase().includes(tamano) || 
-                  v.id === tamano ||
-                  v.tipo === tamano
-                );
-                if (variante) value = variante.precio;
-              }
-              
-              // Fallback: usar precio base si es campo de precio
-              if (value === undefined && parsed.field.startsWith("precio")) {
-                value = producto.precio;
-              }
             } else {
               value = producto[parsed.field];
             }
