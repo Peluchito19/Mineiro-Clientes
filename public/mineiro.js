@@ -398,7 +398,6 @@
     // 1. Limpiar localStorage
     clearAllPreserved();
     localEdits.clear();
-    htmlOriginalDelCodigo.clear();
     
     // Limpiar cualquier otro item de localStorage relacionado con mineiro
     const keysToRemove = [];
@@ -411,7 +410,54 @@
     keysToRemove.forEach(key => localStorage.removeItem(key));
     log(`   ✓ Limpiados ${keysToRemove.length} items de localStorage`);
     
-    // 2. Limpiar site_config.productos, config.menu Y TODOS los precios guardados
+    // 2. Restaurar HTML original de todos los elementos ANTES de limpiar la base de datos
+    let elementosRestaurados = 0;
+    htmlOriginalDelCodigo.forEach((original, el) => {
+      try {
+        if (el && el.parentNode) {
+          // Restaurar innerHTML original
+          if (original.innerHTML !== undefined) {
+            el.innerHTML = original.innerHTML;
+          }
+          
+          // Restaurar atributo style original
+          if (original.styleAttribute === '' || original.styleAttribute === null) {
+            el.removeAttribute('style');
+          } else if (original.styleAttribute) {
+            el.setAttribute('style', original.styleAttribute);
+          }
+          
+          // Restaurar src si es imagen
+          if (original.src && el.tagName?.toLowerCase() === 'img') {
+            el.src = original.src;
+          }
+          
+          // Restaurar href si es enlace
+          if (original.href && el.tagName?.toLowerCase() === 'a') {
+            el.href = original.href;
+          }
+          
+          // Restaurar background-image si tenía
+          if (original.backgroundImage) {
+            el.style.backgroundImage = original.backgroundImage;
+          }
+          
+          // Quitar atributos de mineiro
+          el.removeAttribute('data-mineiro-hydrated');
+          el.removeAttribute('data-mineiro-preserved');
+          
+          elementosRestaurados++;
+        }
+      } catch (err) {
+        warn(`Error restaurando elemento:`, err.message);
+      }
+    });
+    log(`   ✓ Restaurados ${elementosRestaurados} elementos a su HTML original`);
+    
+    // Limpiar el mapa después de restaurar
+    htmlOriginalDelCodigo.clear();
+    
+    // 3. Limpiar site_config.productos, config.menu Y TODOS los precios guardados
     if (tiendaData?.id && tiendaData?.site_config) {
       try {
         const newSiteConfig = JSON.parse(JSON.stringify(tiendaData.site_config));
@@ -443,15 +489,25 @@
       }
     }
     
-    // 3. Quitar atributos de hidratación de todos los elementos
+    // 4. Quitar elementos creados dinámicamente (secciones nuevas, productos añadidos)
+    document.querySelectorAll('.mineiro-new-products-section, .mineiro-category-section, .mineiro-product-card, [data-mineiro-product-id]').forEach(el => {
+      el.remove();
+    });
+    log('   ✓ Elementos dinámicos removidos');
+    
+    // 5. Quitar atributos de hidratación de todos los elementos restantes
     document.querySelectorAll('[data-mineiro-hydrated]').forEach(el => {
       el.removeAttribute('data-mineiro-hydrated');
     });
     
-    log('✅ TODOS los datos de Mineiro han sido limpiados. Recarga la página para ver los valores originales del HTML.');
+    log('✅ TODOS los datos de Mineiro han sido limpiados y restaurados.');
     
-    // Mostrar alerta al usuario
-    alert('✅ Datos limpiados correctamente.\n\nRecarga la página (F5) para ver los valores originales de tu HTML.');
+    // Mostrar alerta y recargar automáticamente
+    const recargar = confirm('✅ Datos limpiados correctamente.\n\n¿Deseas recargar la página ahora para ver los cambios?\n\n(Recomendado)');
+    
+    if (recargar) {
+      window.location.reload();
+    }
     
     return true;
   };
@@ -1819,45 +1875,143 @@
       ? formatCLP(producto.precio) 
       : producto.precio || '$0';
     
+    // 🔍 Función auxiliar para encontrar la mejor tarjeta de producto para clonar
+    const findBestCardToClone = (containerEl) => {
+      if (!containerEl) return null;
+      
+      // Buscar elementos con binding de producto
+      const productBindings = containerEl.querySelectorAll('[data-mineiro-bind*="producto-"]');
+      
+      // 🎯 MEJORADO: Recopilar todas las tarjetas candidatas y elegir la mejor
+      const candidates = [];
+      
+      for (const binding of productBindings) {
+        // Subir en el DOM para encontrar el contenedor de la tarjeta
+        let current = binding;
+        let maxAttempts = 8;
+        
+        while (current && current !== containerEl && current !== document.body && maxAttempts > 0) {
+          current = current.parentElement;
+          maxAttempts--;
+          
+          if (!current) break;
+          
+          // Verificar si este elemento parece ser una tarjeta de producto
+          const className = current.className?.toLowerCase() || '';
+          const tagName = current.tagName?.toLowerCase() || '';
+          
+          // ⚠️ IMPORTANTE: Excluir elementos que definitivamente NO son tarjetas
+          if (tagName === 'section' || 
+              tagName === 'main' || 
+              tagName === 'body' ||
+              tagName === 'header' ||
+              tagName === 'footer' ||
+              tagName === 'nav' ||
+              className.includes('container') ||
+              className.includes('wrapper') ||
+              className.includes('section') ||
+              className.includes('row') ||
+              className.includes('layout')) {
+            continue; // Saltar este nivel, seguir buscando más arriba
+          }
+          
+          const hasProductBindings = current.querySelectorAll('[data-mineiro-bind*="producto-"]').length >= 1;
+          const numElements = current.querySelectorAll('*').length;
+          const hasReasonableElements = numElements >= 2 && numElements <= 50; // No muy vacío ni muy lleno
+          
+          // Criterios para ser considerada una tarjeta válida
+          const looksLikeCard = className.includes('card') || 
+                               className.includes('item') || 
+                               className.includes('product') || 
+                               className.includes('producto') ||
+                               (className.includes('menu') && !className.includes('menu-container'));
+          
+          const notTooLarge = current.children.length <= 12;
+          const hasReasonableSize = current.offsetHeight > 50 && current.offsetHeight < 600;
+          
+          if (hasProductBindings && hasReasonableElements && notTooLarge) {
+            // Calcular puntuación de la tarjeta candidata
+            let score = 0;
+            
+            if (looksLikeCard) score += 10;
+            if (hasReasonableSize) score += 5;
+            if (current.querySelector('[data-mineiro-bind*=".nombre"]')) score += 3;
+            if (current.querySelector('[data-mineiro-bind*=".precio"]')) score += 3;
+            if (current.querySelector('img, [data-mineiro-bind*=".imagen"]')) score += 2;
+            if (numElements < 30) score += 2; // Preferir elementos más compactos
+            
+            candidates.push({ element: current, score, className });
+          }
+        }
+      }
+      
+      // Ordenar candidatos por puntuación y devolver el mejor
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => b.score - a.score);
+        const best = candidates[0];
+        log(`   🔍 Tarjeta candidata encontrada: ${best.className || 'sin clase'} (score: ${best.score})`);
+        return best.element;
+      }
+      
+      // Fallback: buscar por clases comunes
+      const fallbackSelectors = [
+        '.product-card', '.menu-item', '.producto', '.card',
+        '[class*="product-card"]', '[class*="menu-item"]', '[class*="producto"]'
+      ];
+      
+      for (const selector of fallbackSelectors) {
+        const card = containerEl.querySelector(selector);
+        if (card && card.querySelectorAll('*').length >= 2 && card.querySelectorAll('*').length <= 50) {
+          log(`   🔍 Tarjeta fallback encontrada con selector: ${selector}`);
+          return card;
+        }
+      }
+      
+      return null;
+    };
+    
     // Intentar clonar una tarjeta existente del contenedor
     if (container) {
-      const existingCard = container.querySelector('[data-mineiro-bind*="producto-"]')?.closest('.card, .product-card, .menu-item, .producto, [class*="card"], [class*="item"]')
-                        || container.querySelector('[class*="product"], [class*="item"], [class*="card"]');
+      const existingCard = findBestCardToClone(container);
       
       if (existingCard) {
+        log(`   📋 Clonando tarjeta existente para: ${producto.nombre}`);
         const clonedCard = existingCard.cloneNode(true);
         clonedCard.dataset.mineiroProductId = domId;
         
-        // Remover IDs duplicados
+        // Remover IDs duplicados para evitar conflictos
         clonedCard.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
         
-        // Actualizar los bindings y valores
-        const updateElement = (selector, value, bindSuffix) => {
-          const el = clonedCard.querySelector(selector);
-          if (el) {
-            el.dataset.mineiroBind = `producto-${domId}.${bindSuffix}`;
-            if (el.tagName.toLowerCase() === 'img') {
-              el.src = value || '';
-              el.alt = producto.nombre || '';
-            } else {
-              el.textContent = value || '';
-            }
-          }
-        };
+        // Remover atributos de hidratación previos
+        clonedCard.querySelectorAll('[data-mineiro-hydrated]').forEach(el => {
+          el.removeAttribute('data-mineiro-hydrated');
+        });
+        
+        // Actualizar los bindings existentes con el nuevo dom_id
+        clonedCard.querySelectorAll('[data-mineiro-bind]').forEach(el => {
+          const oldBinding = el.dataset.mineiroBind;
+          // Reemplazar el identificador de producto en el binding
+          const newBinding = oldBinding.replace(/producto-[a-zA-Z0-9\-_]+\./, `producto-${domId}.`);
+          el.dataset.mineiroBind = newBinding;
+        });
         
         // Buscar y actualizar imagen
-        const imgEl = clonedCard.querySelector('img');
+        const imgEl = clonedCard.querySelector('img, [data-mineiro-bind*=".imagen"]');
         if (imgEl) {
-          imgEl.src = producto.imagen_url || '';
-          imgEl.alt = producto.nombre || '';
+          if (imgEl.tagName.toLowerCase() === 'img') {
+            imgEl.src = producto.imagen_url || '';
+            imgEl.alt = producto.nombre || '';
+          } else {
+            imgEl.style.backgroundImage = producto.imagen_url ? `url('${producto.imagen_url}')` : '';
+          }
           imgEl.dataset.mineiroBind = `producto-${domId}.imagen_url`;
-          // Remover lazy loading issues
           imgEl.removeAttribute('loading');
         }
         
-        // Buscar y actualizar nombre - priorizar por data-mineiro-bind, luego por clase/tag
+        // Buscar y actualizar nombre - priorizar por data-mineiro-bind
         const nombreEl = clonedCard.querySelector('[data-mineiro-bind*=".nombre"]') 
-                      || clonedCard.querySelector('h1, h2, h3, h4, .product-name, .item-name, .nombre, [class*="name"], [class*="title"]');
+                      || clonedCard.querySelector('h1, h2, h3, h4, h5, h6')
+                      || clonedCard.querySelector('.product-name, .item-name, .nombre, [class*="name"], [class*="title"], [class*="nombre"]');
         if (nombreEl) {
           nombreEl.textContent = producto.nombre;
           nombreEl.dataset.mineiroBind = `producto-${domId}.nombre`;
@@ -1873,23 +2027,29 @@
         
         // Buscar y actualizar descripción
         const descEl = clonedCard.querySelector('[data-mineiro-bind*=".descripcion"]') 
-                    || clonedCard.querySelector('.description, .descripcion, [class*="desc"], p:not([class*="price"])');
+                    || clonedCard.querySelector('.description, .descripcion, [class*="desc"]');
         if (descEl) {
           if (producto.descripcion) {
             descEl.textContent = producto.descripcion;
             descEl.dataset.mineiroBind = `producto-${domId}.descripcion`;
             descEl.style.display = '';
           } else {
+            descEl.textContent = '';
             descEl.style.display = 'none';
           }
         }
         
         // Buscar y actualizar categoría si existe
         const catEl = clonedCard.querySelector('[data-mineiro-bind*=".categoria"]') 
-                   || clonedCard.querySelector('.category, .categoria, [class*="category"]');
-        if (catEl && producto.categoria) {
-          catEl.textContent = producto.categoria;
-          catEl.dataset.mineiroBind = `producto-${domId}.categoria`;
+                   || clonedCard.querySelector('.category, .categoria, [class*="category"], [class*="categoria"]');
+        if (catEl) {
+          if (producto.categoria) {
+            catEl.textContent = producto.categoria;
+            catEl.dataset.mineiroBind = `producto-${domId}.categoria`;
+            catEl.style.display = '';
+          } else {
+            catEl.style.display = 'none';
+          }
         }
         
         // Hacer editable si está en modo admin
@@ -1900,7 +2060,7 @@
           });
         }
         
-        log(`✓ Tarjeta clonada de diseño existente para: ${producto.nombre}`);
+        log(`✓ Tarjeta clonada exitosamente para: ${producto.nombre}`);
         return clonedCard;
       }
     }
@@ -2201,8 +2361,8 @@
       return existingSection;
     }
     
-    // Buscar un contenedor existente de productos para clonar su estilo
-    const existingProductContainer = document.querySelector('[data-mineiro-section], [class*="product"][class*="grid"], [class*="menu"][class*="grid"], .productos-grid, .menu-items');
+    // 🔍 Buscar una sección de categoría existente para CLONAR su estructura
+    const existingSectionToClone = findBestSectionToClone();
     
     // Buscar dónde insertar la nueva sección (después de la última sección de productos)
     let insertAfter = null;
@@ -2214,28 +2374,77 @@
     // Detectar el estilo del sitio
     const siteStyle = detectSiteStyle();
     
-    // Crear la sección
-    const section = document.createElement('section');
-    section.dataset.mineiroSection = nombre;
-    section.dataset.mineiroCategory = slug;
-    section.className = 'mineiro-category-section';
+    let section;
     
-    // Aplicar estilos basados en el diseño del sitio
-    section.style.cssText = `
-      padding: 40px 20px;
-      max-width: 1200px;
-      margin: 0 auto;
-    `;
-    
-    section.innerHTML = `
-      <div class="mineiro-category-header" style="text-align:center;margin-bottom:30px">
-        <h2 data-mineiro-bind="menu.categorias.${slug}.titulo" style="font-size:28px;font-weight:700;color:${siteStyle.textColor};margin:0 0 10px 0">${nombre}</h2>
-        ${descripcion ? `<p data-mineiro-bind="menu.categorias.${slug}.descripcion" style="color:${siteStyle.subtextColor};font-size:14px;margin:0">${descripcion}</p>` : ''}
-      </div>
-      <div class="mineiro-products-grid" data-mineiro-section="${nombre}" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:20px">
-        <!-- Los productos se agregarán aquí -->
-      </div>
-    `;
+    // Si encontramos una sección para clonar, usarla como plantilla
+    if (existingSectionToClone) {
+      log(`📋 Clonando sección existente para nueva categoría: ${nombre}`);
+      section = existingSectionToClone.cloneNode(true);
+      
+      // Actualizar atributos de la sección
+      section.dataset.mineiroSection = nombre;
+      section.dataset.mineiroCategory = slug;
+      section.removeAttribute('id');
+      
+      // Limpiar productos existentes pero mantener el contenedor
+      const productContainer = section.querySelector('[data-mineiro-section], [class*="grid"], [class*="products"], [class*="items"], .productos');
+      if (productContainer) {
+        // Limpiar productos pero mantener la estructura
+        const products = productContainer.querySelectorAll('[data-mineiro-bind*="producto-"], [data-mineiro-product-id], [class*="product-card"], [class*="menu-item"], .producto');
+        products.forEach(p => p.remove());
+        productContainer.dataset.mineiroSection = nombre;
+      }
+      
+      // Actualizar título de la sección
+      const titleEl = section.querySelector('h1, h2, h3, h4, [class*="title"], [class*="heading"]');
+      if (titleEl) {
+        titleEl.textContent = nombre;
+        titleEl.dataset.mineiroBind = `menu.categorias.${slug}.titulo`;
+      }
+      
+      // Actualizar descripción si existe
+      const descEl = section.querySelector('p, [class*="desc"], [class*="subtitle"]');
+      if (descEl && descripcion) {
+        descEl.textContent = descripcion;
+        descEl.dataset.mineiroBind = `menu.categorias.${slug}.descripcion`;
+        descEl.style.display = '';
+      } else if (descEl && !descripcion) {
+        descEl.style.display = 'none';
+      }
+      
+      // Remover IDs duplicados
+      section.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+      
+      // Remover atributos de hidratación
+      section.querySelectorAll('[data-mineiro-hydrated]').forEach(el => {
+        el.removeAttribute('data-mineiro-hydrated');
+      });
+      
+    } else {
+      // Fallback: crear sección desde cero
+      log(`🆕 Creando nueva sección desde cero para: ${nombre}`);
+      section = document.createElement('section');
+      section.dataset.mineiroSection = nombre;
+      section.dataset.mineiroCategory = slug;
+      section.className = 'mineiro-category-section';
+      
+      // Aplicar estilos basados en el diseño del sitio
+      section.style.cssText = `
+        padding: 40px 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+      `;
+      
+      section.innerHTML = `
+        <div class="mineiro-category-header" style="text-align:center;margin-bottom:30px">
+          <h2 data-mineiro-bind="menu.categorias.${slug}.titulo" style="font-size:28px;font-weight:700;color:${siteStyle.textColor};margin:0 0 10px 0">${nombre}</h2>
+          ${descripcion ? `<p data-mineiro-bind="menu.categorias.${slug}.descripcion" style="color:${siteStyle.subtextColor};font-size:14px;margin:0">${descripcion}</p>` : ''}
+        </div>
+        <div class="mineiro-products-grid" data-mineiro-section="${nombre}" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:20px">
+          <!-- Los productos se agregarán aquí -->
+        </div>
+      `;
+    }
     
     // Insertar en el DOM
     if (insertAfter) {
@@ -2260,6 +2469,36 @@
     
     log(`✓ Sección "${nombre}" creada en el DOM`);
     return section;
+  };
+  
+  // 🔍 Buscar la mejor sección existente para clonar
+  const findBestSectionToClone = () => {
+    // Buscar secciones que contengan productos
+    const sectionsWithProducts = [];
+    
+    // Buscar por data-mineiro-section
+    document.querySelectorAll('[data-mineiro-section]').forEach(container => {
+      const parent = container.closest('section, [class*="section"]') || container.parentElement;
+      if (parent && parent.querySelector('[data-mineiro-bind*="producto-"]')) {
+        sectionsWithProducts.push(parent);
+      }
+    });
+    
+    // Buscar secciones que contengan grids de productos
+    document.querySelectorAll('section, [class*="section"]').forEach(section => {
+      const hasProductBindings = section.querySelector('[data-mineiro-bind*="producto-"]');
+      const hasProductClasses = section.querySelector('[class*="product"], [class*="menu-item"], .producto');
+      if ((hasProductBindings || hasProductClasses) && !sectionsWithProducts.includes(section)) {
+        sectionsWithProducts.push(section);
+      }
+    });
+    
+    // Devolver la primera sección válida encontrada
+    if (sectionsWithProducts.length > 0) {
+      return sectionsWithProducts[0];
+    }
+    
+    return null;
   };
   
   // Detectar el estilo general del sitio para adaptar nuevas secciones
@@ -3738,6 +3977,109 @@
         border-radius: 4px;
         font-family: monospace;
         margin: 0 2px;
+      }
+      
+      /* ==========================================
+         ESTILOS PARA TARJETAS DE PRODUCTO Y CATEGORÍAS
+         ========================================== */
+      
+      /* Tarjeta de producto fallback (cuando no se puede clonar) */
+      .mineiro-product-card {
+        display: block;
+        margin: 10px;
+        max-width: 350px;
+        min-width: 250px;
+      }
+      
+      /* Sección de categoría */
+      .mineiro-category-section {
+        margin: 30px 0;
+        padding: 20px;
+      }
+      
+      /* Header de categoría */
+      .mineiro-category-header {
+        text-align: center;
+        margin-bottom: 24px;
+      }
+      
+      .mineiro-category-header h2 {
+        font-size: 24px;
+        font-weight: 700;
+        margin: 0 0 8px 0;
+      }
+      
+      .mineiro-category-header p {
+        font-size: 14px;
+        opacity: 0.8;
+        margin: 0;
+      }
+      
+      /* Grid de productos */
+      .mineiro-products-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 20px;
+        padding: 10px 0;
+      }
+      
+      /* Sección temporal para productos nuevos */
+      .mineiro-new-products-section {
+        padding: 20px;
+        margin: 20px auto;
+        max-width: 1200px;
+        background: rgba(6, 182, 212, 0.05);
+        border: 2px dashed rgba(6, 182, 212, 0.3);
+        border-radius: 16px;
+      }
+      
+      .mineiro-new-products-section h3 {
+        color: #06b6d4;
+        font-size: 14px;
+        margin: 0 0 16px 0;
+        font-weight: 600;
+      }
+      
+      /* Animaciones */
+      @keyframes mineiroFadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      @keyframes mineiroSlideIn {
+        from { opacity: 0; transform: translateX(20px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+      
+      /* Notificación de producto creado */
+      .mineiro-product-notification {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #059669, #10b981);
+        color: white;
+        padding: 16px 24px;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        z-index: 100001;
+        animation: mineiroSlideIn 0.3s ease;
+        max-width: 350px;
+      }
+      
+      .mineiro-product-notification button {
+        margin-top: 10px;
+        padding: 6px 12px;
+        background: rgba(255, 255, 255, 0.2);
+        border: none;
+        border-radius: 6px;
+        color: white;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background 0.2s;
+      }
+      
+      .mineiro-product-notification button:hover {
+        background: rgba(255, 255, 255, 0.3);
       }
     `;
     document.head.appendChild(style);
