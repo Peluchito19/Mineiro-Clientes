@@ -1779,70 +1779,145 @@
     const precio = typeof producto.precio === 'number' 
       ? formatCLP(producto.precio) 
       : producto.precio || '$0';
+    const categoriaSlug = producto.categoria?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || '';
     
-    // Intentar clonar una tarjeta existente del contenedor
+    // 🎯 ESTRATEGIA: Buscar la ÚLTIMA tarjeta existente en la misma categoría para clonarla
+    let templateCard = null;
+    
+    // 1. Buscar tarjetas en el contenedor actual (prioridad)
     if (container) {
-      const existingCard = container.querySelector('[data-mineiro-bind*="producto-"]')?.closest('.card, .product-card, .menu-item, .producto, [class*="card"], [class*="item"]')
-                        || container.querySelector('[class*="product"], [class*="item"], [class*="card"]');
-      
-      if (existingCard) {
-        const clonedCard = existingCard.cloneNode(true);
-        clonedCard.dataset.mineiroProductId = domId;
+      // Buscar TODAS las tarjetas en el contenedor y obtener la última
+      const allCardsInContainer = container.querySelectorAll('[data-mineiro-bind*="producto-"]');
+      if (allCardsInContainer.length > 0) {
+        // Obtener el padre (la tarjeta real) del último elemento con binding
+        const lastBindingEl = allCardsInContainer[allCardsInContainer.length - 1];
+        templateCard = lastBindingEl.closest('.card, .product-card, .menu-item, .producto, [class*="card"], [class*="item"], article, li, div[class]');
         
-        // Actualizar los bindings y valores
-        const updateElement = (selector, value, bindSuffix) => {
-          const el = clonedCard.querySelector(selector);
-          if (el) {
-            el.dataset.mineiroBind = `producto-${domId}.${bindSuffix}`;
-            if (el.tagName.toLowerCase() === 'img') {
-              el.src = value || '';
-              el.alt = producto.nombre || '';
-            } else {
-              el.textContent = value || '';
-            }
+        // Si no encontró un contenedor padre, buscar el padre directo que tenga clases
+        if (!templateCard || templateCard === container) {
+          let parent = lastBindingEl.parentElement;
+          while (parent && parent !== container && !parent.className) {
+            parent = parent.parentElement;
           }
-        };
-        
-        // Buscar y actualizar imagen
-        const imgEl = clonedCard.querySelector('img');
-        if (imgEl) {
-          imgEl.src = producto.imagen_url || '';
-          imgEl.alt = producto.nombre || '';
-          imgEl.dataset.mineiroBind = `producto-${domId}.imagen_url`;
+          if (parent && parent !== container) {
+            templateCard = parent;
+          }
         }
-        
-        // Buscar y actualizar nombre
-        const nombreEl = clonedCard.querySelector('[data-mineiro-bind*=".nombre"], h1, h2, h3, h4, .product-name, .item-name, .nombre');
-        if (nombreEl) {
-          nombreEl.textContent = producto.nombre;
-          nombreEl.dataset.mineiroBind = `producto-${domId}.nombre`;
-        }
-        
-        // Buscar y actualizar precio
-        const precioEl = clonedCard.querySelector('[data-mineiro-bind*=".precio"], .price, .precio, [class*="price"]');
-        if (precioEl) {
-          precioEl.textContent = precio;
-          precioEl.dataset.mineiroBind = `producto-${domId}.precio`;
-        }
-        
-        // Buscar y actualizar descripción
-        const descEl = clonedCard.querySelector('[data-mineiro-bind*=".descripcion"], .description, .descripcion, p');
-        if (descEl && producto.descripcion) {
-          descEl.textContent = producto.descripcion;
-          descEl.dataset.mineiroBind = `producto-${domId}.descripcion`;
-        }
-        
-        // Hacer editable si está en modo admin
-        if (adminMode) {
-          clonedCard.querySelectorAll('[data-mineiro-bind]').forEach(el => {
-            el.style.cursor = 'pointer';
-            el.style.outline = '1px dashed rgba(34,211,238,0.4)';
-          });
-        }
-        
-        log(`✓ Tarjeta clonada de diseño existente`);
-        return clonedCard;
       }
+      
+      // Fallback: buscar por clases de card
+      if (!templateCard) {
+        const cardsByClass = container.querySelectorAll('.card, .product-card, .menu-item, .producto, [class*="card"], [class*="item"]');
+        if (cardsByClass.length > 0) {
+          templateCard = cardsByClass[cardsByClass.length - 1];
+        }
+      }
+    }
+    
+    // 2. Si no hay container o no encontró, buscar en secciones de la misma categoría
+    if (!templateCard && categoriaSlug) {
+      const categoryContainers = document.querySelectorAll(
+        `[data-mineiro-section="${categoriaSlug}"], [data-mineiro-category="${categoriaSlug}"], [data-mineiro-categoria="${categoriaSlug}"], [data-category="${categoriaSlug}"]`
+      );
+      for (const catContainer of categoryContainers) {
+        const cardsInCat = catContainer.querySelectorAll('[data-mineiro-bind*="producto-"]');
+        if (cardsInCat.length > 0) {
+          const lastEl = cardsInCat[cardsInCat.length - 1];
+          templateCard = lastEl.closest('.card, .product-card, .menu-item, .producto, [class*="card"], [class*="item"], article, li, div[class]');
+          if (templateCard && templateCard !== catContainer) break;
+        }
+      }
+    }
+    
+    // 3. Fallback: Buscar cualquier tarjeta de producto existente en todo el DOM
+    if (!templateCard) {
+      const allProductCards = document.querySelectorAll('[data-mineiro-bind*="producto-"]');
+      if (allProductCards.length > 0) {
+        const lastEl = allProductCards[allProductCards.length - 1];
+        templateCard = lastEl.closest('.card, .product-card, .menu-item, .producto, [class*="card"], [class*="item"], article, li, div[class]');
+      }
+    }
+    
+    // 🔄 CLONAR la tarjeta template si la encontramos
+    if (templateCard && templateCard.tagName.toLowerCase() !== 'body' && templateCard.tagName.toLowerCase() !== 'main') {
+      const clonedCard = templateCard.cloneNode(true);
+      
+      // Limpiar el ID anterior y establecer el nuevo
+      clonedCard.removeAttribute('id');
+      clonedCard.dataset.mineiroProductId = domId;
+      
+      // Buscar y actualizar TODOS los elementos con binding
+      const bindingElements = clonedCard.querySelectorAll('[data-mineiro-bind]');
+      bindingElements.forEach(el => {
+        const oldBinding = el.dataset.mineiroBind;
+        
+        // Determinar qué tipo de campo es basado en el binding
+        if (oldBinding.includes('.imagen') || oldBinding.includes('.image') || el.tagName.toLowerCase() === 'img') {
+          el.dataset.mineiroBind = `producto-${domId}.imagen_url`;
+          if (el.tagName.toLowerCase() === 'img') {
+            el.src = producto.imagen_url || '';
+            el.alt = producto.nombre || '';
+          } else if (el.style.backgroundImage) {
+            el.style.backgroundImage = producto.imagen_url ? `url(${producto.imagen_url})` : '';
+          }
+        } else if (oldBinding.includes('.nombre') || oldBinding.includes('.name') || oldBinding.includes('.titulo')) {
+          el.dataset.mineiroBind = `producto-${domId}.nombre`;
+          el.textContent = producto.nombre;
+        } else if (oldBinding.includes('.precio') || oldBinding.includes('.price')) {
+          el.dataset.mineiroBind = `producto-${domId}.precio`;
+          el.textContent = precio;
+        } else if (oldBinding.includes('.descripcion') || oldBinding.includes('.description')) {
+          el.dataset.mineiroBind = `producto-${domId}.descripcion`;
+          el.textContent = producto.descripcion || '';
+        } else if (oldBinding.includes('.categoria') || oldBinding.includes('.category')) {
+          el.dataset.mineiroBind = `producto-${domId}.categoria`;
+          el.textContent = producto.categoria || '';
+        } else {
+          // Para cualquier otro binding, actualizar el prefijo del producto
+          const fieldMatch = oldBinding.match(/producto-[^.]+\.(.+)$/);
+          if (fieldMatch) {
+            el.dataset.mineiroBind = `producto-${domId}.${fieldMatch[1]}`;
+          }
+        }
+      });
+      
+      // También buscar imágenes sin binding y actualizarlas
+      const imgElements = clonedCard.querySelectorAll('img:not([data-mineiro-bind])');
+      imgElements.forEach(img => {
+        if (producto.imagen_url) {
+          img.src = producto.imagen_url;
+          img.alt = producto.nombre || '';
+          img.dataset.mineiroBind = `producto-${domId}.imagen_url`;
+        }
+      });
+      
+      // Buscar elementos de texto que puedan ser nombre/precio/descripción sin binding
+      if (!clonedCard.querySelector('[data-mineiro-bind*=".nombre"]')) {
+        const headings = clonedCard.querySelectorAll('h1, h2, h3, h4, h5, h6, [class*="name"], [class*="title"], [class*="nombre"]');
+        if (headings.length > 0) {
+          headings[0].textContent = producto.nombre;
+          headings[0].dataset.mineiroBind = `producto-${domId}.nombre`;
+        }
+      }
+      
+      if (!clonedCard.querySelector('[data-mineiro-bind*=".precio"]')) {
+        const priceEls = clonedCard.querySelectorAll('[class*="price"], [class*="precio"], [class*="cost"]');
+        if (priceEls.length > 0) {
+          priceEls[0].textContent = precio;
+          priceEls[0].dataset.mineiroBind = `producto-${domId}.precio`;
+        }
+      }
+      
+      // Hacer editable si está en modo admin
+      if (adminMode) {
+        clonedCard.querySelectorAll('[data-mineiro-bind]').forEach(el => {
+          el.style.cursor = 'pointer';
+          el.style.outline = '1px dashed rgba(34,211,238,0.4)';
+        });
+      }
+      
+      log(`✓ Tarjeta clonada de diseño existente (última tarjeta de la categoría)`);
+      return clonedCard;
     }
     
     // Fallback: crear tarjeta con diseño por defecto
@@ -2098,6 +2173,9 @@
       if (result.success) {
         tiendaData.site_config = siteConfig;
         
+        // 🎯 CREAR BOTÓN DE CATEGORÍA EN EL MENÚ VISUALMENTE
+        tryCreateCategoryButton(slug, nombre);
+        
         btn.innerHTML = '✅ ¡Categoría creada!';
         btn.style.background = '#22c55e';
         
@@ -2120,6 +2198,112 @@
         btn.disabled = false;
       }, 2000);
     }
+  };
+
+  // 🔘 Función para crear un botón de categoría en el menú de filtros
+  const tryCreateCategoryButton = (slug, nombre) => {
+    // Buscar botones de categoría existentes en el DOM
+    const existingCategoryButtons = document.querySelectorAll('[data-mineiro-bind*="menu.categorias."][data-mineiro-bind*=".boton"]');
+    
+    if (existingCategoryButtons.length === 0) {
+      log(`⚠️ No se encontraron botones de categoría existentes para clonar`);
+      return false;
+    }
+    
+    // Obtener el último botón existente para clonarlo
+    const lastButton = existingCategoryButtons[existingCategoryButtons.length - 1];
+    const buttonContainer = lastButton.parentElement;
+    
+    if (!buttonContainer) {
+      log(`⚠️ No se encontró contenedor de botones de categoría`);
+      return false;
+    }
+    
+    // Verificar que no exista ya un botón para esta categoría
+    const existingButton = buttonContainer.querySelector(`[data-mineiro-bind*="menu.categorias.${slug}"]`);
+    if (existingButton) {
+      log(`ℹ️ Botón de categoría "${slug}" ya existe`);
+      return true;
+    }
+    
+    // Clonar el botón template
+    const newButton = lastButton.cloneNode(true);
+    
+    // Actualizar bindings y contenido
+    const bindingElements = newButton.querySelectorAll('[data-mineiro-bind]');
+    if (bindingElements.length > 0) {
+      bindingElements.forEach(el => {
+        const oldBinding = el.dataset.mineiroBind;
+        if (oldBinding.includes('.boton')) {
+          el.dataset.mineiroBind = `menu.categorias.${slug}.boton`;
+          el.textContent = nombre;
+        } else if (oldBinding.includes('.icono')) {
+          el.dataset.mineiroBind = `menu.categorias.${slug}.icono`;
+          // Mantener el ícono original o usar uno por defecto
+        } else if (oldBinding.includes('.titulo')) {
+          el.dataset.mineiroBind = `menu.categorias.${slug}.titulo`;
+          el.textContent = nombre;
+        }
+      });
+    } else {
+      // El botón mismo tiene el binding
+      newButton.dataset.mineiroBind = `menu.categorias.${slug}.boton`;
+      newButton.textContent = nombre;
+    }
+    
+    // Actualizar atributos de filtrado si existen
+    if (newButton.dataset.filter) {
+      newButton.dataset.filter = slug;
+    }
+    if (newButton.dataset.category) {
+      newButton.dataset.category = slug;
+    }
+    if (newButton.dataset.productoId) {
+      newButton.removeAttribute('data-producto-id');
+    }
+    
+    // Agregar funcionalidad de filtrado
+    newButton.addEventListener('click', (e) => {
+      if (!adminMode) {
+        // Filtrar productos por esta categoría
+        const allProducts = document.querySelectorAll('[data-mineiro-product-id], [data-mineiro-bind*="producto-"]');
+        allProducts.forEach(prod => {
+          const card = prod.closest('[data-mineiro-product-id]') || prod.closest('.card, .product-card, [class*="card"]');
+          if (card) {
+            const prodCategory = card.querySelector('[data-mineiro-bind*=".categoria"]')?.textContent?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || '';
+            if (prodCategory === slug || slug === 'todos' || slug === 'all') {
+              card.style.display = '';
+            } else {
+              // Verificar si el producto pertenece a esta categoría
+              const bindings = Array.from(card.querySelectorAll('[data-mineiro-bind]')).map(el => el.dataset.mineiroBind).join(' ');
+              if (bindings.includes(slug)) {
+                card.style.display = '';
+              } else {
+                card.style.display = 'none';
+              }
+            }
+          }
+        });
+      }
+    });
+    
+    // Insertar el nuevo botón después del último
+    buttonContainer.appendChild(newButton);
+    
+    // Si estamos en modo admin, hacer editable
+    if (adminMode) {
+      newButton.querySelectorAll('[data-mineiro-bind]').forEach(el => {
+        el.style.cursor = 'pointer';
+        el.style.outline = '1px dashed rgba(34,211,238,0.4)';
+      });
+      if (newButton.dataset.mineiroBind) {
+        newButton.style.cursor = 'pointer';
+        newButton.style.outline = '1px dashed rgba(34,211,238,0.4)';
+      }
+    }
+    
+    log(`✓ Botón de categoría "${nombre}" creado visualmente`);
+    return true;
   };
 
   const createNewTestimonio = async () => {
