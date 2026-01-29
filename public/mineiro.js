@@ -3985,12 +3985,19 @@
     const isInsideButton = el.closest('button') !== null;
     const isNavElement = el.closest('nav, [role="navigation"], [role="tablist"], .nav, .navigation, .tabs, .category-tabs, .filter-tabs') !== null;
     const hasOnClick = el.hasAttribute('onclick') || el.closest('[onclick]') !== null;
-    const isInteractiveButton = (isButton || isInsideButton) && (isNavElement || hasOnClick || 
+    
+    // 🎯 DETECTAR SI ES BOTÓN DE CATEGORÍA DEL MENÚ (por el binding)
+    const binding = el.dataset.mineiroBind || '';
+    const isCategoryBinding = binding.includes('menu.categorias.') || 
+                              binding.includes('.boton') || 
+                              binding.includes('.icono');
+    
+    const isInteractiveButton = (isButton || isInsideButton) && (isNavElement || hasOnClick || isCategoryBinding ||
       el.closest('[data-filter], [data-category], [data-tab], [data-producto-id]') !== null);
     
     // Si es un enlace, botón de navegación, o elemento interactivo: NO BLOQUEAR
     if (isLink || isInsideLink || isInteractiveButton) {
-      log(`🖱️ Click en elemento interactivo: ${el.dataset.mineiroBind} → Ejecutando acción normal (doble-click para editar)`);
+      log(`🖱️ Click en elemento interactivo: ${binding} → Ejecutando acción normal (doble-click para editar)`);
       // NO hacer nada - dejar que ejecute su función normal
       return;
     }
@@ -4007,7 +4014,7 @@
 
     saveComputedStyles(el);
     showEditPopup(el);
-    log(`🖱️ Click en elemento: ${el.dataset.mineiroBind} → Abriendo editor`);
+    log(`🖱️ Click en elemento: ${binding} → Abriendo editor`);
   };
 
   // DOUBLE CLICK - Para editar enlaces, botones de navegación y elementos interactivos
