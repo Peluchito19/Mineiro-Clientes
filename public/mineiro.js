@@ -396,11 +396,17 @@
     keysToRemove.forEach(key => localStorage.removeItem(key));
     log(`   ✓ Limpiados ${keysToRemove.length} items de localStorage`);
     
-    // 2. Limpiar site_config.productos en la base de datos
+    // 2. Limpiar site_config.productos Y config.menu en la base de datos
     if (tiendaData?.id && tiendaData?.site_config) {
       try {
         const newSiteConfig = JSON.parse(JSON.stringify(tiendaData.site_config));
         delete newSiteConfig.productos; // Eliminar todos los productos guardados en site_config
+        
+        // También limpiar config.menu donde se pueden guardar precios de productos
+        if (newSiteConfig.config?.menu) {
+          delete newSiteConfig.config.menu;
+          log('   ✓ config.menu limpiado');
+        }
         
         const response = await fetch(EDIT_API_URL, {
           method: 'POST',
@@ -623,13 +629,12 @@
         
         // Fallback: buscar en site_config si no hay producto en BD
         if (value === undefined) {
-          // Buscar en site_config.config.menu.{categoria}.{producto}.{campo}
-          if (parsed.categoria) {
+          // PRIMERO buscar en site_config.productos (donde se guardan las ediciones)
+          value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
+          
+          // Si no está ahí, buscar en config.menu.{categoria}.{producto}.{campo}
+          if (value === undefined && parsed.categoria) {
             value = getNestedValue(siteConfig, `config.menu.${parsed.categoria}.${parsed.identifier}.${parsed.field}`);
-          }
-          // También buscar en site_config.productos
-          if (value === undefined) {
-            value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
           }
         }
         break;
@@ -4735,10 +4740,23 @@
           
           log(`   ⚠️ Producto "${parsed.identifier}" no encontrado en BD, guardando en site_config`);
           const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+          
+          // Guardar en site_config.productos (ruta principal)
           if (!siteConfig.productos) siteConfig.productos = {};
           if (!siteConfig.productos[parsed.identifier]) siteConfig.productos[parsed.identifier] = {};
-          
           siteConfig.productos[parsed.identifier][parsed.field] = value;
+          
+          // TAMBIÉN actualizar config.menu si hay categoría (para mantener sincronizado)
+          if (parsed.categoria) {
+            if (!siteConfig.config) siteConfig.config = {};
+            if (!siteConfig.config.menu) siteConfig.config.menu = {};
+            if (!siteConfig.config.menu[parsed.categoria]) siteConfig.config.menu[parsed.categoria] = {};
+            if (!siteConfig.config.menu[parsed.categoria][parsed.identifier]) {
+              siteConfig.config.menu[parsed.categoria][parsed.identifier] = {};
+            }
+            siteConfig.config.menu[parsed.categoria][parsed.identifier][parsed.field] = value;
+            log(`   ✓ Guardado también en config.menu.${parsed.categoria}.${parsed.identifier}.${parsed.field}`);
+          }
           
           apiPayload = {
             action: "update",
