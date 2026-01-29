@@ -585,56 +585,59 @@
       }
 
       case "producto": {
-        // 🔍 Buscar producto por dom_id o nombre normalizado
-        const searchId = parsed.identifier.toLowerCase();
-        let producto = productos.find(p => p.dom_id === parsed.identifier)
-                    || productos.find(p => String(p.id) === parsed.identifier)
-                    || productos.find(p => p.nombre?.toLowerCase().replace(/\s+/g, '-') === searchId)
-                    || productos.find(p => p.nombre?.toLowerCase() === searchId.replace(/-/g, ' '))
-                    || productos.find(p => p.nombre?.toLowerCase().includes(searchId.replace(/-/g, ' ')));
+        // 🎯 PRIORIDAD DE LECTURA (de mayor a menor prioridad):
+        // 1. site_config.productos (ediciones del usuario) - SIEMPRE PRIMERO
+        // 2. site_config.config.menu (ediciones por categoría)
+        // 3. Producto en base de datos (valores originales)
         
-        if (producto) {
-          // 🎯 El campo puede ser "precio.fam", "precio.ind", "nombre", etc.
-          // Primero intentar obtener el valor directo del producto
-          if (parsed.field.includes(".")) {
-            // Campo anidado: precio.fam -> producto.precio.fam o producto.configuracion.precios.fam
-            value = getNestedValue(producto, parsed.field);
-            
-            // Si no se encuentra, buscar en configuracion.precios
-            if (value === undefined && parsed.field.startsWith("precio.")) {
-              const tamano = parsed.field.split(".")[1]; // "fam", "ind", "xl"
-              value = getNestedValue(producto, `configuracion.precios.${tamano}`);
-            }
-            
-            // Si aún no se encuentra, intentar buscar variantes
-            if (value === undefined && parsed.field.startsWith("precio.")) {
-              const tamano = parsed.field.split(".")[1];
-              const variantes = producto.configuracion?.variantes || [];
-              const variante = variantes.find(v => 
-                v.nombre?.toLowerCase().includes(tamano) || 
-                v.id === tamano ||
-                v.tipo === tamano
-              );
-              if (variante) value = variante.precio;
-            }
-            
-            // Fallback: usar precio base si es campo de precio
-            if (value === undefined && parsed.field.startsWith("precio")) {
-              value = producto.precio;
-            }
-          } else {
-            value = producto[parsed.field];
-          }
+        // 🥇 PRIMERO: Buscar en site_config.productos (donde se guardan las ediciones del usuario)
+        value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
+        
+        // 🥈 SEGUNDO: Buscar en config.menu.{categoria}.{producto}.{campo}
+        if (value === undefined && parsed.categoria) {
+          value = getNestedValue(siteConfig, `config.menu.${parsed.categoria}.${parsed.identifier}.${parsed.field}`);
         }
         
-        // Fallback: buscar en site_config si no hay producto en BD
+        // 🥉 TERCERO: Solo si no hay valor editado, buscar en productos de BD
         if (value === undefined) {
-          // PRIMERO buscar en site_config.productos (donde se guardan las ediciones)
-          value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
+          const searchId = parsed.identifier.toLowerCase();
+          let producto = productos.find(p => p.dom_id === parsed.identifier)
+                      || productos.find(p => String(p.id) === parsed.identifier)
+                      || productos.find(p => p.nombre?.toLowerCase().replace(/\s+/g, '-') === searchId)
+                      || productos.find(p => p.nombre?.toLowerCase() === searchId.replace(/-/g, ' '))
+                      || productos.find(p => p.nombre?.toLowerCase().includes(searchId.replace(/-/g, ' ')));
           
-          // Si no está ahí, buscar en config.menu.{categoria}.{producto}.{campo}
-          if (value === undefined && parsed.categoria) {
-            value = getNestedValue(siteConfig, `config.menu.${parsed.categoria}.${parsed.identifier}.${parsed.field}`);
+          if (producto) {
+            // 🎯 El campo puede ser "precio.fam", "precio.ind", "nombre", etc.
+            if (parsed.field.includes(".")) {
+              // Campo anidado: precio.fam -> producto.precio.fam o producto.configuracion.precios.fam
+              value = getNestedValue(producto, parsed.field);
+              
+              // Si no se encuentra, buscar en configuracion.precios
+              if (value === undefined && parsed.field.startsWith("precio.")) {
+                const tamano = parsed.field.split(".")[1]; // "fam", "ind", "xl"
+                value = getNestedValue(producto, `configuracion.precios.${tamano}`);
+              }
+              
+              // Si aún no se encuentra, intentar buscar variantes
+              if (value === undefined && parsed.field.startsWith("precio.")) {
+                const tamano = parsed.field.split(".")[1];
+                const variantes = producto.configuracion?.variantes || [];
+                const variante = variantes.find(v => 
+                  v.nombre?.toLowerCase().includes(tamano) || 
+                  v.id === tamano ||
+                  v.tipo === tamano
+                );
+                if (variante) value = variante.precio;
+              }
+              
+              // Fallback: usar precio base si es campo de precio
+              if (value === undefined && parsed.field.startsWith("precio")) {
+                value = producto.precio;
+              }
+            } else {
+              value = producto[parsed.field];
+            }
           }
         }
         break;
@@ -4631,6 +4634,61 @@
     }
   };
 
+  // 🗑️ Función para ELIMINAR un campo de site_config.productos (restaurar al HTML original)
+  const deleteFromSiteConfigProductos = async (parsed) => {
+    if (!tiendaData || !tiendaData.id) {
+      throw new Error("Tienda no configurada");
+    }
+    
+    const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+    let modified = false;
+    
+    // Eliminar de site_config.productos
+    if (siteConfig.productos?.[parsed.identifier]?.[parsed.field] !== undefined) {
+      delete siteConfig.productos[parsed.identifier][parsed.field];
+      // Si el producto quedó vacío, eliminarlo también
+      if (Object.keys(siteConfig.productos[parsed.identifier]).length === 0) {
+        delete siteConfig.productos[parsed.identifier];
+      }
+      modified = true;
+      log(`🗑️ Eliminado site_config.productos.${parsed.identifier}.${parsed.field}`);
+    }
+    
+    // Eliminar de config.menu si hay categoría
+    if (parsed.categoria && siteConfig.config?.menu?.[parsed.categoria]?.[parsed.identifier]?.[parsed.field] !== undefined) {
+      delete siteConfig.config.menu[parsed.categoria][parsed.identifier][parsed.field];
+      // Limpiar objetos vacíos
+      if (Object.keys(siteConfig.config.menu[parsed.categoria][parsed.identifier]).length === 0) {
+        delete siteConfig.config.menu[parsed.categoria][parsed.identifier];
+      }
+      modified = true;
+      log(`🗑️ Eliminado config.menu.${parsed.categoria}.${parsed.identifier}.${parsed.field}`);
+    }
+    
+    if (modified) {
+      // Guardar site_config actualizado
+      tiendaData.site_config = siteConfig;
+      
+      const response = await fetch(EDIT_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          table: "tiendas",
+          data: { site_config: siteConfig },
+          where: { id: tiendaData.id }
+        })
+      });
+      
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "Error eliminando de site_config");
+      }
+      
+      log(`✓ site_config actualizado - campo eliminado para restaurar HTML original`);
+    }
+  };
+
   // Función auxiliar para guardar a la API
   const saveToAPI = async (parsed, value, el, isUndo = false) => {
     let apiPayload = null;
@@ -4833,6 +4891,46 @@
 
         // Actualizar cache local
         Object.assign(producto, updateData);
+        
+        // 🎯 TAMBIÉN guardar en site_config.productos para persistencia de ediciones
+        // Esto asegura que las ediciones del usuario se mantengan incluso si
+        // la BD tiene valores diferentes
+        const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
+        if (!siteConfig.productos) siteConfig.productos = {};
+        if (!siteConfig.productos[parsed.identifier]) siteConfig.productos[parsed.identifier] = {};
+        siteConfig.productos[parsed.identifier][parsed.field] = value;
+        
+        // También actualizar config.menu si hay categoría
+        if (parsed.categoria) {
+          if (!siteConfig.config) siteConfig.config = {};
+          if (!siteConfig.config.menu) siteConfig.config.menu = {};
+          if (!siteConfig.config.menu[parsed.categoria]) siteConfig.config.menu[parsed.categoria] = {};
+          if (!siteConfig.config.menu[parsed.categoria][parsed.identifier]) {
+            siteConfig.config.menu[parsed.categoria][parsed.identifier] = {};
+          }
+          siteConfig.config.menu[parsed.categoria][parsed.identifier][parsed.field] = value;
+        }
+        
+        // Guardar site_config actualizado también
+        tiendaData.site_config = siteConfig;
+        
+        // Hacer una segunda llamada para guardar en tiendas.site_config
+        try {
+          await fetch(EDIT_API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "update",
+              table: "tiendas",
+              data: { site_config: siteConfig },
+              where: { id: tiendaData.id }
+            })
+          });
+          log(`   ✓ También guardado en site_config.productos.${parsed.identifier}.${parsed.field}`);
+        } catch (err) {
+          warn(`   ⚠️ Error guardando en site_config:`, err.message);
+        }
+        
         break;
       }
 
@@ -4966,20 +5064,20 @@
     
     if (!input && !richEditor) return;
 
-    // SI el usuario eligió "original", usar el valor original del código HTML
+    // SI el usuario eligió "original", ELIMINAR el valor de site_config para que
+    // el HTML original se muestre sin sobrescribir
     const codeOriginal = htmlOriginalDelCodigo.get(el);
     let value, plainTextValue, valueForAPI;
+    let deleteFromSiteConfig = false; // Flag para eliminar en lugar de guardar
     
     if (selectedStyle === "original" && codeOriginal) {
-      // Usar el contenido original del código HTML
+      // Marcar para ELIMINAR de site_config en lugar de guardar
+      deleteFromSiteConfig = true;
+      // Usar el contenido original del código HTML para mostrar
       value = codeOriginal.innerHTML;
       plainTextValue = codeOriginal.textContent;
-      // Para restaurar: guardar el HTML original si tiene formato, sino texto plano
-      const hasHTMLInOriginal = value !== plainTextValue && (
-        value.includes('<') && value.includes('>')
-      );
-      valueForAPI = hasHTMLInOriginal ? value : plainTextValue;
-      log("Guardando valor ORIGINAL del código HTML:", valueForAPI);
+      valueForAPI = null; // No guardar valor, sino eliminar
+      log("Restaurando al ORIGINAL del código HTML - se eliminará de site_config");
     } else {
       // Obtener valor del editor: priorizar HTML enriquecido si existe
       value = richHTML || (richEditor ? richEditor.innerHTML : input?.value);
@@ -5017,8 +5115,13 @@
     saveBtn.disabled = true;
 
     try {
-      // Guardar a la API (con HTML si tiene formato, texto plano si no)
-      await saveToAPI(parsed, valueForAPI, el);
+      // Si estamos restaurando al original, ELIMINAR de site_config
+      if (deleteFromSiteConfig && parsed.type === "producto") {
+        await deleteFromSiteConfigProductos(parsed);
+      } else {
+        // Guardar a la API (con HTML si tiene formato, texto plano si no)
+        await saveToAPI(parsed, valueForAPI, el);
+      }
 
       // Aplicar valor al elemento
       if (selectedStyle === "original" && codeOriginal) {
