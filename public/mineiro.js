@@ -303,6 +303,43 @@
   
   // Set de elementos que el usuario restauró a original y no deben re-hidratarse
   const preservedOriginalElements = new Set();
+  
+  // Key para localStorage de elementos preservados
+  const PRESERVED_STORAGE_KEY = 'mineiro_preserved_bindings';
+  
+  // Cargar elementos preservados desde localStorage
+  const loadPreservedBindings = () => {
+    try {
+      const stored = localStorage.getItem(PRESERVED_STORAGE_KEY);
+      if (stored) {
+        const bindings = JSON.parse(stored);
+        log(`Cargados ${bindings.length} bindings preservados desde localStorage`);
+        return new Set(bindings);
+      }
+    } catch (err) {
+      warn('Error cargando preserved bindings:', err.message);
+    }
+    return new Set();
+  };
+  
+  // Guardar elementos preservados en localStorage
+  const savePreservedBindings = () => {
+    try {
+      const bindings = [];
+      preservedOriginalElements.forEach(el => {
+        if (el.dataset?.mineiroBind) {
+          bindings.push(el.dataset.mineiroBind);
+        }
+      });
+      localStorage.setItem(PRESERVED_STORAGE_KEY, JSON.stringify(bindings));
+      log(`Guardados ${bindings.length} bindings preservados en localStorage`);
+    } catch (err) {
+      warn('Error guardando preserved bindings:', err.message);
+    }
+  };
+  
+  // Set de bindings que fueron preservados (persiste entre recargas)
+  const preservedBindingsSet = loadPreservedBindings();
 
   // Función para capturar el HTML original de todos los elementos ANTES de hidratar
   const captureOriginalHTML = () => {
@@ -318,6 +355,14 @@
           backgroundImage: el.style.backgroundImage || null,
           styleAttribute: el.getAttribute('style') || '',
         });
+        
+        // Si este binding estaba preservado en localStorage, marcarlo
+        const binding = el.dataset.mineiroBind;
+        if (binding && preservedBindingsSet.has(binding)) {
+          preservedOriginalElements.add(el);
+          el.dataset.mineiroPreserved = 'true';
+          log(`Elemento preservado restaurado: ${binding}`);
+        }
       }
     });
     log(`Capturados ${htmlOriginalDelCodigo.size} elementos originales del código HTML`);
@@ -786,7 +831,14 @@
     preservedOriginalElements.add(el);
     el.dataset.mineiroPreserved = 'true';
     
-    log("✓ Restaurado al HTML original del código (protegido de re-hidratación)");
+    // Persistir en localStorage para que sobreviva recargas
+    const binding = el.dataset.mineiroBind;
+    if (binding) {
+      preservedBindingsSet.add(binding);
+      savePreservedBindings();
+    }
+    
+    log("✓ Restaurado al HTML original del código (protegido de re-hidratación, persistido)");
     return true;
   };
 
@@ -1238,46 +1290,183 @@
     
     log(`Intentando renderizar producto: ${producto.nombre} en categoría: ${categoria}`);
     
-    // Buscar contenedores de sección que coincidan con la categoría
-    const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
     let rendered = false;
     
+    // Estrategia 1: Buscar contenedores con data-mineiro-section
+    const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
     sectionContainers.forEach(container => {
       const sectionName = container.dataset.mineiroSection?.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       
-      // Si la categoría coincide o el container es genérico
       if (sectionName === categoria || sectionName === 'todos' || sectionName === 'all' || !categoria) {
-        const card = createProductCard(producto);
+        const card = createProductCard(producto, container);
         container.appendChild(card);
         rendered = true;
         log(`✓ Producto renderizado en sección: ${sectionName}`);
       }
     });
     
-    // Buscar contenedores de categoría específicos
+    // Estrategia 2: Buscar contenedores con data-mineiro-category
     const categoryContainers = document.querySelectorAll(`[data-mineiro-category="${categoria}"], [data-mineiro-categoria="${categoria}"]`);
     categoryContainers.forEach(container => {
-      const card = createProductCard(producto);
+      const card = createProductCard(producto, container);
       container.appendChild(card);
       rendered = true;
       log(`✓ Producto renderizado en categoría: ${categoria}`);
     });
     
+    // Estrategia 3: Buscar contenedores que ya tengan productos de esta categoría
     if (!rendered) {
-      log(`ℹ️ No se encontró contenedor para mostrar el producto. El producto fue guardado en la base de datos.`);
-      log(`   Para mostrarlo, agrega: <div data-mineiro-section="${categoria || 'productos'}"></div>`);
+      const existingProducts = document.querySelectorAll(`[data-mineiro-bind*="producto-"]`);
+      const categoriaLower = categoria.toLowerCase();
+      
+      existingProducts.forEach(prodEl => {
+        // Buscar el contenedor padre que tenga múltiples productos
+        const container = prodEl.closest('.products-grid, .menu-grid, .productos-container, [class*="grid"], [class*="products"], section, .category-products') 
+                       || prodEl.parentElement?.parentElement;
+        
+        if (container && !container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
+          // Verificar si este contenedor tiene productos de la misma categoría
+          const siblingsWithCategory = container.querySelectorAll('[data-mineiro-bind*=".categoria"]');
+          let matchesCategory = siblingsWithCategory.length === 0; // Si no hay categorías, asumir match
+          
+          siblingsWithCategory.forEach(catEl => {
+            if (catEl.textContent?.toLowerCase().includes(categoriaLower) || 
+                categoriaLower.includes(catEl.textContent?.toLowerCase() || '')) {
+              matchesCategory = true;
+            }
+          });
+          
+          if (matchesCategory) {
+            const card = createProductCard(producto, container);
+            container.appendChild(card);
+            rendered = true;
+            log(`✓ Producto renderizado junto a productos existentes`);
+          }
+        }
+      });
+    }
+    
+    // Estrategia 4: Buscar cualquier grid o contenedor de productos
+    if (!rendered) {
+      const genericContainers = document.querySelectorAll('.products-grid, .menu-items, .productos, [class*="product-list"], [class*="menu-grid"]');
+      if (genericContainers.length > 0) {
+        const card = createProductCard(producto, genericContainers[0]);
+        genericContainers[0].appendChild(card);
+        rendered = true;
+        log(`✓ Producto renderizado en contenedor genérico`);
+      }
+    }
+    
+    if (!rendered) {
+      // Mostrar alerta visual al usuario
+      showProductCreatedNotification(producto);
+      log(`ℹ️ Producto guardado en DB. No se encontró contenedor visual.`);
+      log(`   Recarga la página para ver el producto o agrega: <div data-mineiro-section="${categoria || 'productos'}"></div>`);
     }
     
     return rendered;
   };
+  
+  // Mostrar notificación cuando el producto se crea pero no se puede renderizar
+  const showProductCreatedNotification = (producto) => {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: white;
+      padding: 16px 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 100001;
+      animation: mineiroSlideIn 0.3s ease;
+      max-width: 350px;
+    `;
+    notification.innerHTML = `
+      <div style="font-weight:600;margin-bottom:4px">✅ Producto creado</div>
+      <div style="font-size:13px;opacity:0.9">"${producto.nombre}" guardado. Recarga la página para verlo en su categoría.</div>
+      <button onclick="window.location.reload()" style="margin-top:10px;padding:6px 12px;background:rgba(255,255,255,0.2);border:none;border-radius:6px;color:white;cursor:pointer;font-size:12px">
+        🔄 Recargar página
+      </button>
+    `;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 8000);
+  };
 
-  // Crear tarjeta de producto HTML
-  const createProductCard = (producto) => {
+  // Crear tarjeta de producto HTML - intenta clonar estilo existente
+  const createProductCard = (producto, container = null) => {
     const domId = producto.dom_id || producto.id;
     const precio = typeof producto.precio === 'number' 
       ? formatCLP(producto.precio) 
       : producto.precio || '$0';
     
+    // Intentar clonar una tarjeta existente del contenedor
+    if (container) {
+      const existingCard = container.querySelector('[data-mineiro-bind*="producto-"]')?.closest('.card, .product-card, .menu-item, .producto, [class*="card"], [class*="item"]')
+                        || container.querySelector('[class*="product"], [class*="item"], [class*="card"]');
+      
+      if (existingCard) {
+        const clonedCard = existingCard.cloneNode(true);
+        clonedCard.dataset.mineiroProductId = domId;
+        
+        // Actualizar los bindings y valores
+        const updateElement = (selector, value, bindSuffix) => {
+          const el = clonedCard.querySelector(selector);
+          if (el) {
+            el.dataset.mineiroBind = `producto-${domId}.${bindSuffix}`;
+            if (el.tagName.toLowerCase() === 'img') {
+              el.src = value || '';
+              el.alt = producto.nombre || '';
+            } else {
+              el.textContent = value || '';
+            }
+          }
+        };
+        
+        // Buscar y actualizar imagen
+        const imgEl = clonedCard.querySelector('img');
+        if (imgEl) {
+          imgEl.src = producto.imagen_url || '';
+          imgEl.alt = producto.nombre || '';
+          imgEl.dataset.mineiroBind = `producto-${domId}.imagen_url`;
+        }
+        
+        // Buscar y actualizar nombre
+        const nombreEl = clonedCard.querySelector('[data-mineiro-bind*=".nombre"], h1, h2, h3, h4, .product-name, .item-name, .nombre');
+        if (nombreEl) {
+          nombreEl.textContent = producto.nombre;
+          nombreEl.dataset.mineiroBind = `producto-${domId}.nombre`;
+        }
+        
+        // Buscar y actualizar precio
+        const precioEl = clonedCard.querySelector('[data-mineiro-bind*=".precio"], .price, .precio, [class*="price"]');
+        if (precioEl) {
+          precioEl.textContent = precio;
+          precioEl.dataset.mineiroBind = `producto-${domId}.precio`;
+        }
+        
+        // Buscar y actualizar descripción
+        const descEl = clonedCard.querySelector('[data-mineiro-bind*=".descripcion"], .description, .descripcion, p');
+        if (descEl && producto.descripcion) {
+          descEl.textContent = producto.descripcion;
+          descEl.dataset.mineiroBind = `producto-${domId}.descripcion`;
+        }
+        
+        // Hacer editable si está en modo admin
+        if (adminMode) {
+          clonedCard.querySelectorAll('[data-mineiro-bind]').forEach(el => {
+            el.style.cursor = 'pointer';
+            el.style.outline = '1px dashed rgba(34,211,238,0.4)';
+          });
+        }
+        
+        log(`✓ Tarjeta clonada de diseño existente`);
+        return clonedCard;
+      }
+    }
+    
+    // Fallback: crear tarjeta con diseño por defecto
     const card = document.createElement('div');
     card.className = 'mineiro-product-card';
     card.dataset.mineiroProductId = domId;
@@ -2954,6 +3143,41 @@
         outline: 2px dashed rgba(6, 182, 212, 0.5);
         outline-offset: 4px;
       }
+      
+      /* Navigation hint tooltip */
+      .mineiro-nav-hint {
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1e293b;
+        color: #f1f5f9;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        white-space: nowrap;
+        z-index: 100002;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        border: 1px solid #334155;
+        margin-bottom: 8px;
+        animation: mineiroFadeIn 0.2s ease;
+      }
+      .mineiro-nav-hint::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 6px solid transparent;
+        border-top-color: #1e293b;
+      }
+      .mineiro-nav-hint kbd {
+        background: #334155;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: monospace;
+        margin: 0 2px;
+      }
     `;
     document.head.appendChild(style);
 
@@ -3344,6 +3568,25 @@
       return;
     }
 
+    // Si es un enlace y el usuario mantiene Ctrl/Cmd o Shift, permitir navegación normal
+    const isLink = el.tagName.toLowerCase() === 'a' || el.closest('a');
+    const wantsNavigation = e.ctrlKey || e.metaKey || e.shiftKey;
+    
+    if (isLink && wantsNavigation) {
+      // Permitir navegación normal - no interceptar
+      log('Navegación permitida (Ctrl/Shift + click)');
+      return;
+    }
+    
+    // Si es un enlace de categoría del menú, mostrar tooltip de ayuda
+    if (isLink && el.closest('[data-mineiro-bind*="menu.categorias"]')) {
+      // Primera vez: mostrar hint
+      if (!el.dataset.mineiroHintShown) {
+        el.dataset.mineiroHintShown = 'true';
+        showNavigationHint(el);
+      }
+    }
+
     e.preventDefault();
     e.stopPropagation();
 
@@ -3359,6 +3602,23 @@
     saveComputedStyles(el);
 
     showEditPopup(el);
+  };
+
+  // Mostrar tooltip de ayuda para navegación
+  const showNavigationHint = (el) => {
+    // Remover hints anteriores
+    document.querySelectorAll('.mineiro-nav-hint').forEach(h => h.remove());
+    
+    const hint = document.createElement('div');
+    hint.className = 'mineiro-nav-hint';
+    hint.innerHTML = `Para navegar: <kbd>Ctrl</kbd>+click o <kbd>Shift</kbd>+click`;
+    
+    // Posicionar sobre el elemento
+    el.style.position = 'relative';
+    el.appendChild(hint);
+    
+    // Auto-remover después de 3 segundos
+    setTimeout(() => hint.remove(), 3000);
   };
 
   const showEditPopup = (el) => {
