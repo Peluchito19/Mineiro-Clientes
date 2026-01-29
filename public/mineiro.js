@@ -674,9 +674,13 @@
   };
 
   // Forzar re-hidratación completa (quitar atributo hydrated)
+  // IMPORTANTE: No re-hidratar elementos que el usuario restauró a original
   const forceRehydrateAll = () => {
     document.querySelectorAll("[data-mineiro-bind][data-mineiro-hydrated]").forEach(el => {
-      el.removeAttribute("data-mineiro-hydrated");
+      // No tocar elementos preservados por el usuario
+      if (!preservedOriginalElements.has(el) && el.dataset.mineiroPreserved !== 'true') {
+        el.removeAttribute("data-mineiro-hydrated");
+      }
     });
     runHydration(tiendaData, productosCache, testimoniosCache);
   };
@@ -2911,6 +2915,45 @@
         border-radius: 4px;
         color: #06b6d4;
       }
+      
+      /* Category Add Product Buttons */
+      .mineiro-category-add-btn {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #06b6d4, #0891b2);
+        border: 2px solid rgba(255,255,255,0.2);
+        color: white;
+        font-size: 24px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 15px rgba(6, 182, 212, 0.4);
+        transition: all 0.2s ease;
+        z-index: 100;
+        opacity: 0;
+        transform: scale(0.8);
+      }
+      .mineiro-section-wrapper:hover .mineiro-category-add-btn,
+      [data-mineiro-section]:hover .mineiro-category-add-btn {
+        opacity: 1;
+        transform: scale(1);
+      }
+      .mineiro-category-add-btn:hover {
+        transform: scale(1.1);
+        box-shadow: 0 6px 20px rgba(6, 182, 212, 0.6);
+      }
+      .mineiro-section-wrapper {
+        position: relative;
+      }
+      .mineiro-section-highlight {
+        outline: 2px dashed rgba(6, 182, 212, 0.5);
+        outline-offset: 4px;
+      }
     `;
     document.head.appendChild(style);
 
@@ -2969,6 +3012,9 @@
 
     // Keyboard shortcuts
     document.addEventListener("keydown", handleKeyboardShortcuts);
+    
+    // Agregar botones "+" a las secciones de categorías para añadir productos
+    addCategoryAddButtons();
 
     log("Modo admin activado - Haz clic en cualquier elemento con data-mineiro-bind para editarlo");
     log("Atajos: Ctrl+Z para deshacer, Escape para cerrar popup");
@@ -3024,6 +3070,9 @@
     document.body.classList.remove("mineiro-admin-active", "bar-hidden");
     document.removeEventListener("click", handleAdminClick, true);
     document.removeEventListener("keydown", handleKeyboardShortcuts);
+    
+    // Remover botones de agregar producto de categorías
+    document.querySelectorAll(".mineiro-category-add-btn").forEach(btn => btn.remove());
 
     if (selectedElement) {
       selectedElement.classList.remove("mineiro-selected");
@@ -3031,6 +3080,246 @@
     }
 
     log("Modo admin desactivado");
+  };
+
+  // Agregar botones "+" a las secciones de categorías para añadir productos
+  const addCategoryAddButtons = () => {
+    // Buscar contenedores de sección con data-mineiro-section
+    const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
+    
+    sectionContainers.forEach(container => {
+      // No agregar si ya tiene un botón
+      if (container.querySelector('.mineiro-category-add-btn')) return;
+      
+      const sectionName = container.dataset.mineiroSection;
+      if (!sectionName) return;
+      
+      // Asegurar que el contenedor tenga position relative
+      const computedPosition = window.getComputedStyle(container).position;
+      if (computedPosition === 'static') {
+        container.style.position = 'relative';
+      }
+      
+      // Crear botón de agregar
+      const addBtn = document.createElement('button');
+      addBtn.className = 'mineiro-category-add-btn';
+      addBtn.innerHTML = '+';
+      addBtn.title = `Agregar producto a "${sectionName}"`;
+      addBtn.dataset.categorySlug = sectionName;
+      
+      addBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showQuickAddProductModal(sectionName);
+      });
+      
+      container.appendChild(addBtn);
+      log(`Botón "+" agregado a sección: ${sectionName}`);
+    });
+    
+    // También buscar contenedores con data-mineiro-category
+    const categoryContainers = document.querySelectorAll('[data-mineiro-category], [data-mineiro-categoria]');
+    
+    categoryContainers.forEach(container => {
+      if (container.querySelector('.mineiro-category-add-btn')) return;
+      
+      const categoryName = container.dataset.mineiroCategory || container.dataset.mineiroCategoria;
+      if (!categoryName) return;
+      
+      const computedPosition = window.getComputedStyle(container).position;
+      if (computedPosition === 'static') {
+        container.style.position = 'relative';
+      }
+      
+      const addBtn = document.createElement('button');
+      addBtn.className = 'mineiro-category-add-btn';
+      addBtn.innerHTML = '+';
+      addBtn.title = `Agregar producto a "${categoryName}"`;
+      addBtn.dataset.categorySlug = categoryName;
+      
+      addBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showQuickAddProductModal(categoryName);
+      });
+      
+      container.appendChild(addBtn);
+    });
+  };
+
+  // Modal rápido para agregar producto a una categoría específica
+  const showQuickAddProductModal = (categorySlug) => {
+    // Remover modal anterior si existe
+    document.querySelector('.mineiro-quick-add-modal')?.remove();
+    
+    const categoryTitle = categorySlug
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+    
+    const modal = document.createElement('div');
+    modal.className = 'mineiro-quick-add-modal mineiro-edit-popup';
+    modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:90vw;z-index:100001';
+    
+    modal.innerHTML = `
+      <h3>
+        ➕ Nuevo producto en "${categoryTitle}"
+        <button type="button" class="close-btn" id="quick-add-close">&times;</button>
+      </h3>
+      
+      <label>Nombre del producto *</label>
+      <input type="text" id="quick-add-nombre" placeholder="Ej: Pizza Margherita" />
+      
+      <label>Precio *</label>
+      <input type="number" id="quick-add-precio" placeholder="5000" step="100" />
+      
+      <label>Descripción (opcional)</label>
+      <textarea id="quick-add-descripcion" placeholder="Descripción del producto..." style="min-height:60px"></textarea>
+      
+      <label>Imagen (opcional)</label>
+      <div class="mineiro-image-preview" id="quick-add-image-drop" style="height:100px">
+        <div class="upload-hint">📷 Clic o arrastra imagen</div>
+      </div>
+      <input type="file" accept="image/*" id="quick-add-file" style="display:none" />
+      <input type="hidden" id="quick-add-imagen-url" />
+      
+      <div class="mineiro-edit-actions" style="margin-top:16px">
+        <button type="button" class="mineiro-admin-btn mineiro-admin-btn-secondary" id="quick-add-cancel" style="flex:1">
+          Cancelar
+        </button>
+        <button type="button" class="mineiro-admin-btn mineiro-admin-btn-success" id="quick-add-save" style="flex:1">
+          💾 Crear Producto
+        </button>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Event listeners
+    const closeModal = () => modal.remove();
+    
+    document.getElementById('quick-add-close').onclick = closeModal;
+    document.getElementById('quick-add-cancel').onclick = closeModal;
+    
+    // Image handling
+    const imageDrop = document.getElementById('quick-add-image-drop');
+    const fileInput = document.getElementById('quick-add-file');
+    const imageUrlInput = document.getElementById('quick-add-imagen-url');
+    
+    imageDrop.onclick = () => fileInput.click();
+    imageDrop.ondragover = (e) => { e.preventDefault(); imageDrop.classList.add('dragover'); };
+    imageDrop.ondragleave = () => imageDrop.classList.remove('dragover');
+    imageDrop.ondrop = async (e) => {
+      e.preventDefault();
+      imageDrop.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        await handleQuickAddImage(file, imageDrop, imageUrlInput);
+      }
+    };
+    
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        await handleQuickAddImage(file, imageDrop, imageUrlInput);
+      }
+    };
+    
+    // Save product
+    document.getElementById('quick-add-save').onclick = async () => {
+      const nombre = document.getElementById('quick-add-nombre').value.trim();
+      const precio = parseFloat(document.getElementById('quick-add-precio').value) || 0;
+      const descripcion = document.getElementById('quick-add-descripcion').value.trim();
+      const imagenUrl = imageUrlInput.value;
+      
+      if (!nombre) {
+        alert('El nombre es requerido');
+        return;
+      }
+      if (!precio) {
+        alert('El precio es requerido');
+        return;
+      }
+      
+      const saveBtn = document.getElementById('quick-add-save');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="mineiro-spinner"></span> Guardando...';
+      
+      try {
+        const domId = nombre.toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)/g, '');
+        
+        const productoData = {
+          tienda_id: tiendaData?.id,
+          dom_id: domId,
+          nombre,
+          precio,
+          descripcion: descripcion || null,
+          imagen_url: imagenUrl || null,
+          categoria: categorySlug,
+          activo: true,
+          user_id: tiendaData?.user_id || null
+        };
+        
+        const response = await fetch(EDIT_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'insert',
+            table: 'productos',
+            data: productoData
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          const newProduct = result.data || { ...productoData, id: crypto.randomUUID() };
+          productosCache.push(newProduct);
+          
+          // Renderizar el producto en su contenedor
+          tryRenderNewProduct(newProduct);
+          
+          saveBtn.innerHTML = '✅ ¡Creado!';
+          saveBtn.style.background = '#22c55e';
+          
+          setTimeout(closeModal, 1000);
+          log(`✓ Producto "${nombre}" creado en categoría "${categorySlug}"`);
+        } else {
+          throw new Error(result.error || 'Error al crear producto');
+        }
+      } catch (err) {
+        warn('Error al crear producto:', err.message);
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '💾 Crear Producto';
+        alert('Error: ' + err.message);
+      }
+    };
+    
+    // Focus en nombre
+    document.getElementById('quick-add-nombre').focus();
+  };
+
+  // Manejar imagen en modal rápido
+  const handleQuickAddImage = async (file, previewContainer, urlInput) => {
+    previewContainer.innerHTML = '<div class="upload-hint"><div class="mineiro-spinner"></div> Subiendo...</div>';
+    
+    try {
+      const imageUrl = await uploadImageToStorage(file);
+      previewContainer.innerHTML = `<img src="${imageUrl}" alt="Preview" style="max-height:100%;max-width:100%;object-fit:contain" />`;
+      urlInput.value = imageUrl;
+    } catch (err) {
+      // Fallback a base64
+      try {
+        const base64 = await fileToBase64(file);
+        previewContainer.innerHTML = `<img src="${base64}" alt="Preview" style="max-height:100%;max-width:100%;object-fit:contain" />`;
+        urlInput.value = base64;
+      } catch (err2) {
+        previewContainer.innerHTML = '<div class="upload-hint">❌ Error al cargar imagen</div>';
+      }
+    }
   };
 
   const handleAdminClick = (e) => {
@@ -3190,6 +3479,10 @@
     // Generar HTML del popup
     let contentHTML = "";
     
+    // Obtener imagen original del código HTML
+    const originalImageData = htmlOriginalDelCodigo.get(el);
+    const originalImageSrc = originalImageData?.src || originalImageData?.backgroundImage?.replace(/url\(['"]?(.+?)['"]?\)/i, "$1") || null;
+    
     if (isImage) {
       contentHTML = `
         <div class="mineiro-image-preview" id="mineiro-image-drop">
@@ -3203,6 +3496,15 @@
         <input type="file" accept="image/*" class="mineiro-file-input" id="mineiro-file-input" />
         <label>O ingresa URL de imagen</label>
         <input type="url" id="mineiro-edit-input" value="${escapedValue}" placeholder="https://..." />
+        ${originalImageSrc && originalImageSrc !== currentValue ? `
+          <button type="button" class="mineiro-admin-btn mineiro-restore-original-btn" id="mineiro-restore-image-btn" style="margin-top:10px;width:100%">
+            🔄 Restaurar imagen original
+          </button>
+          <div style="margin-top:8px;padding:8px;background:#1e293b;border-radius:6px;font-size:11px;color:#94a3b8">
+            <strong>Original:</strong><br>
+            <img src="${originalImageSrc}" style="max-width:100%;max-height:60px;margin-top:4px;border-radius:4px;opacity:0.7" />
+          </div>
+        ` : ''}
       `;
     } else if (isLongText) {
       contentHTML = `
@@ -3320,6 +3622,19 @@
 
     // Manejo de imágenes
     if (isImage) {
+      // Botón para restaurar imagen original
+      const restoreImageBtn = document.getElementById("mineiro-restore-image-btn");
+      if (restoreImageBtn && originalImageSrc) {
+        restoreImageBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          input.value = originalImageSrc;
+          if (imageDrop) {
+            imageDrop.innerHTML = `<img src="${originalImageSrc}" alt="Preview" />`;
+          }
+          log("✓ Imagen restaurada al original del código HTML");
+        });
+      }
+      
       // Click para seleccionar archivo
       imageDrop?.addEventListener("click", () => fileInput?.click());
       
