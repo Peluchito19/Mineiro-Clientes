@@ -1317,124 +1317,174 @@
   // Función para renderizar un nuevo producto en contenedores existentes
   const tryRenderNewProduct = (producto) => {
     const categoria = producto.categoria?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || '';
+    const categoriaOriginal = producto.categoria?.toLowerCase().trim() || '';
     const domId = producto.dom_id || producto.id;
     
-    log(`Intentando renderizar producto: ${producto.nombre} en categoría: ${categoria}`);
+    log(`🎯 Renderizando producto: "${producto.nombre}" | Categoría: "${categoriaOriginal}" | dom_id: ${domId}`);
     
     let rendered = false;
     
     // Estrategia 1: Buscar contenedores con data-mineiro-section
     const sectionContainers = document.querySelectorAll('[data-mineiro-section]');
+    log(`   Secciones encontradas: ${sectionContainers.length}`);
     sectionContainers.forEach(container => {
       const sectionName = container.dataset.mineiroSection?.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const sectionOriginal = container.dataset.mineiroSection?.toLowerCase().trim() || '';
       
-      if (sectionName === categoria || sectionName === 'todos' || sectionName === 'all' || !categoria) {
+      if (sectionName === categoria || sectionOriginal === categoriaOriginal || 
+          sectionName === 'todos' || sectionName === 'all' || !categoria) {
         const card = createProductCard(producto, container);
         container.appendChild(card);
         rendered = true;
-        log(`✓ Producto renderizado en sección: ${sectionName}`);
+        log(`   ✓ Renderizado en sección: ${sectionOriginal}`);
       }
     });
     
-    // Estrategia 2: Buscar contenedores con data-mineiro-category
-    const categoryContainers = document.querySelectorAll(`[data-mineiro-category="${categoria}"], [data-mineiro-categoria="${categoria}"]`);
-    categoryContainers.forEach(container => {
-      const card = createProductCard(producto, container);
-      container.appendChild(card);
-      rendered = true;
-      log(`✓ Producto renderizado en categoría: ${categoria}`);
-    });
-    
-    // Estrategia 3: Buscar contenedores que ya tengan productos de esta categoría
+    // Estrategia 2: Buscar contenedores con data-mineiro-category o data-category
     if (!rendered) {
-      const existingProducts = document.querySelectorAll(`[data-mineiro-bind*="producto-"]`);
-      const categoriaLower = categoria.toLowerCase();
+      const categorySelectors = [
+        `[data-mineiro-category="${categoria}"]`,
+        `[data-mineiro-category="${categoriaOriginal}"]`,
+        `[data-mineiro-categoria="${categoria}"]`,
+        `[data-mineiro-categoria="${categoriaOriginal}"]`,
+        `[data-category="${categoria}"]`,
+        `[data-category="${categoriaOriginal}"]`
+      ];
       
-      existingProducts.forEach(prodEl => {
-        // Buscar el contenedor padre que tenga múltiples productos
-        const container = prodEl.closest('.products-grid, .menu-grid, .productos-container, [class*="grid"], [class*="products"], section, .category-products') 
-                       || prodEl.parentElement?.parentElement;
-        
-        if (container && !container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
-          // Verificar si este contenedor tiene productos de la misma categoría
-          const siblingsWithCategory = container.querySelectorAll('[data-mineiro-bind*=".categoria"]');
-          let matchesCategory = siblingsWithCategory.length === 0; // Si no hay categorías, asumir match
-          
-          siblingsWithCategory.forEach(catEl => {
-            if (catEl.textContent?.toLowerCase().includes(categoriaLower) || 
-                categoriaLower.includes(catEl.textContent?.toLowerCase() || '')) {
-              matchesCategory = true;
-            }
-          });
-          
-          if (matchesCategory) {
+      for (const selector of categorySelectors) {
+        const containers = document.querySelectorAll(selector);
+        containers.forEach(container => {
+          if (!rendered) {
             const card = createProductCard(producto, container);
             container.appendChild(card);
             rendered = true;
-            log(`✓ Producto renderizado junto a productos existentes`);
+            log(`   ✓ Renderizado con selector: ${selector}`);
           }
-        }
-      });
-    }
-    
-    // Estrategia 4: Buscar cualquier grid o contenedor de productos
-    if (!rendered) {
-      const genericContainers = document.querySelectorAll('.products-grid, .menu-items, .productos, [class*="product-list"], [class*="menu-grid"]');
-      if (genericContainers.length > 0) {
-        const card = createProductCard(producto, genericContainers[0]);
-        genericContainers[0].appendChild(card);
-        rendered = true;
-        log(`✓ Producto renderizado en contenedor genérico`);
+        });
+        if (rendered) break;
       }
     }
     
-    // Estrategia 5: ÚLTIMA OPCIÓN - Buscar el padre de cualquier producto existente
+    // Estrategia 3: Buscar secciones por texto del heading
+    if (!rendered && categoriaOriginal) {
+      const allSections = document.querySelectorAll('section, [class*="section"], [class*="category"], [class*="categoria"]');
+      log(`   Buscando por heading en ${allSections.length} secciones...`);
+      
+      for (const section of allSections) {
+        const heading = section.querySelector('h1, h2, h3, h4, h5, h6, [class*="title"], [class*="heading"]');
+        if (heading) {
+          const headingText = heading.textContent?.toLowerCase().trim() || '';
+          if (headingText.includes(categoriaOriginal) || categoriaOriginal.includes(headingText)) {
+            // Buscar un grid o contenedor de productos dentro
+            const grid = section.querySelector('[class*="grid"], [class*="products"], [class*="items"], [class*="menu"], .productos');
+            const container = grid || section;
+            const card = createProductCard(producto, container);
+            container.appendChild(card);
+            rendered = true;
+            log(`   ✓ Renderizado bajo heading: "${headingText}"`);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Estrategia 4: Buscar contenedores que ya tengan productos de la misma categoría
+    if (!rendered && categoriaOriginal) {
+      // Buscar productos existentes con la misma categoría en su binding
+      const existingCatBindings = document.querySelectorAll('[data-mineiro-bind*=".categoria"]');
+      log(`   Bindings de categoría encontrados: ${existingCatBindings.length}`);
+      
+      for (const catEl of existingCatBindings) {
+        const catText = catEl.textContent?.toLowerCase().trim() || '';
+        if (catText.includes(categoriaOriginal) || categoriaOriginal.includes(catText)) {
+          // Encontrar el contenedor padre que tenga el grid de productos
+          let container = catEl.closest('[class*="grid"], [class*="products"], [class*="items"], section');
+          if (!container) {
+            // Subir hasta encontrar un contenedor con varios hijos
+            container = catEl.parentElement;
+            let attempts = 0;
+            while (container && container.children.length < 3 && attempts < 6) {
+              container = container.parentElement;
+              attempts++;
+            }
+          }
+          
+          if (container && container !== document.body && !container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
+            const card = createProductCard(producto, container);
+            container.appendChild(card);
+            rendered = true;
+            log(`   ✓ Renderizado junto a productos de misma categoría`);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Estrategia 5: Buscar cualquier grid o contenedor genérico de productos
     if (!rendered) {
-      const anyProductElement = document.querySelector('[data-mineiro-bind*="producto-"]');
-      if (anyProductElement) {
-        // Subir hasta encontrar un contenedor con múltiples hijos
-        let container = anyProductElement.parentElement;
+      const genericSelectors = [
+        '.products-grid', '.menu-items', '.productos', '.products',
+        '[class*="product-list"]', '[class*="menu-grid"]', '[class*="product-grid"]',
+        '.grid', '[class*="items-container"]'
+      ];
+      
+      for (const selector of genericSelectors) {
+        const containers = document.querySelectorAll(selector);
+        if (containers.length > 0) {
+          const container = containers[0];
+          if (!container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
+            const card = createProductCard(producto, container);
+            container.appendChild(card);
+            rendered = true;
+            log(`   ✓ Renderizado en contenedor genérico: ${selector}`);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Estrategia 6: Buscar el padre de cualquier producto existente
+    if (!rendered) {
+      const anyProduct = document.querySelector('[data-mineiro-bind*="producto-"]');
+      if (anyProduct) {
+        let container = anyProduct.parentElement;
         let attempts = 0;
         while (container && container.children.length < 2 && attempts < 5) {
           container = container.parentElement;
           attempts++;
         }
         
-        if (container && container !== document.body) {
+        if (container && container !== document.body && !container.querySelector(`[data-mineiro-product-id="${domId}"]`)) {
           const card = createProductCard(producto, container);
           container.appendChild(card);
           rendered = true;
-          log(`✓ Producto renderizado en contenedor detectado automáticamente`);
+          log(`   ✓ Renderizado en contenedor de producto existente`);
         }
       }
     }
     
-    // Estrategia 6: Crear un contenedor flotante temporal
+    // Estrategia 7: Crear sección flotante temporal
     if (!rendered) {
-      log(`⚠️ No se encontró contenedor. Creando contenedor flotante temporal.`);
+      log(`   ⚠️ No se encontró contenedor. Creando sección temporal.`);
       
-      // Buscar donde insertar - después del primer producto o al final del main/body
-      const insertPoint = document.querySelector('main, .main, #main, .content, article') || document.body;
+      const insertPoint = document.querySelector('main, .main, #main, .content, article, .menu-section') || document.body;
       
-      // Crear sección temporal para el nuevo producto
       const tempSection = document.createElement('div');
       tempSection.className = 'mineiro-new-products-section';
       tempSection.style.cssText = 'padding:20px;margin:20px 0;background:rgba(6,182,212,0.1);border:2px dashed #06b6d4;border-radius:12px;';
-      tempSection.innerHTML = `<h3 style="color:#06b6d4;margin:0 0 16px 0;font-size:14px;">✨ Nuevos productos (recarga para ver en su categoría)</h3>`;
-      tempSection.dataset.mineiroSection = 'nuevos';
+      tempSection.innerHTML = `<h3 style="color:#06b6d4;margin:0 0 16px 0;font-size:14px;">✨ Nuevos productos - Categoría: ${producto.categoria || 'Sin categoría'}</h3>`;
+      tempSection.dataset.mineiroSection = categoria || 'nuevos';
       
       const card = createProductCard(producto, null);
       tempSection.appendChild(card);
       insertPoint.appendChild(tempSection);
       rendered = true;
-      log(`✓ Producto renderizado en sección temporal`);
+      log(`   ✓ Renderizado en sección temporal`);
     }
     
     if (!rendered) {
-      // Mostrar alerta visual al usuario
       showProductCreatedNotification(producto);
-      log(`ℹ️ Producto guardado en DB. No se encontró contenedor visual.`);
-      log(`   Recarga la página para ver el producto o agrega: <div data-mineiro-section="${categoria || 'productos'}"></div>`);
+      log(`   ℹ️ Producto guardado. Recarga para ver en categoría.`);
     }
     
     return rendered;
@@ -3660,7 +3710,12 @@
     }
 
     // Verificar si es un enlace de navegación (categorías del menú)
-    const isNavigationLink = el.tagName.toLowerCase() === 'a' || el.closest('a');
+    // Un enlace es: el propio elemento es <a> O está dentro de un <a>
+    const linkAncestor = el.closest('a');
+    const isNavigationLink = el.tagName.toLowerCase() === 'a' || linkAncestor;
+    
+    // Debug para ver qué está pasando
+    log(`🖱️ Click en: ${el.tagName} | binding: ${el.dataset.mineiroBind} | esEnlace: ${isNavigationLink}`);
     
     if (isNavigationLink) {
       // Para enlaces: solo resaltar, NO abrir editor (requiere doble-click)
@@ -3676,6 +3731,7 @@
         showLinkEditHint(el);
       }
       // NO bloquear - permitir navegación normal
+      log(`   → Enlace detectado, permitiendo navegación. Doble-click para editar.`);
       return;
     }
 
@@ -3691,7 +3747,7 @@
 
     saveComputedStyles(el);
     showEditPopup(el);
-    log(`Editando: ${el.dataset.mineiroBind}`);
+    log(`   → Abriendo editor para: ${el.dataset.mineiroBind}`);
   };
 
   // DOUBLE CLICK - Solo para editar ENLACES (navegar con click simple)
@@ -4331,43 +4387,79 @@
       }
 
       case "producto": {
-        let producto = productosCache.find(p => p.dom_id === parsed.identifier)
-                    || productosCache.find(p => String(p.id) === parsed.identifier);
+        // 🔍 BÚSQUEDA MEJORADA DE PRODUCTO
+        log(`🔍 Buscando producto para: ${parsed.identifier}`);
+        log(`   Productos en cache: ${productosCache.length}`);
         
+        // Estrategia 1: Por dom_id exacto
+        let producto = productosCache.find(p => p.dom_id === parsed.identifier);
+        if (producto) log(`   ✓ Encontrado por dom_id: ${producto.id} (${producto.nombre})`);
+        
+        // Estrategia 2: Por ID directo
+        if (!producto) {
+          producto = productosCache.find(p => String(p.id) === parsed.identifier);
+          if (producto) log(`   ✓ Encontrado por id: ${producto.id} (${producto.nombre})`);
+        }
+        
+        // Estrategia 3: Por nombre normalizado del binding
+        if (!producto && parsed.identifier) {
+          const searchName = parsed.identifier.replace(/-/g, ' ').toLowerCase().trim();
+          producto = productosCache.find(p => {
+            const pNombre = p.nombre?.toLowerCase().trim() || '';
+            const pDomId = (p.dom_id || '').toLowerCase().replace(/-/g, ' ').trim();
+            return pNombre === searchName || pDomId === searchName ||
+                   pNombre.includes(searchName) || searchName.includes(pNombre);
+          });
+          if (producto) log(`   ✓ Encontrado por nombre: ${producto.id} (${producto.nombre})`);
+        }
+        
+        // Estrategia 4: Buscar en el contexto del DOM
         if (!producto && el) {
           const container = el.closest('[data-mineiro-bind*="producto-"]') 
                          || el.closest('.product-card, .producto, [class*="product"], [class*="producto"], [class*="menu-item"], [class*="item"]')
                          || el.parentElement?.parentElement;
           
           if (container) {
+            // Buscar el nombre del producto en el contenedor
             const nombreEl = container.querySelector('[data-mineiro-bind*=".nombre"]')
                           || container.querySelector('h1, h2, h3, h4, h5, .product-name, .nombre-producto, .item-name');
             
             if (nombreEl) {
               const nombreTexto = nombreEl.textContent?.trim().toLowerCase();
               if (nombreTexto) {
-                producto = productosCache.find(p => 
-                  p.nombre?.toLowerCase().includes(nombreTexto) || 
-                  nombreTexto.includes(p.nombre?.toLowerCase())
-                );
+                producto = productosCache.find(p => {
+                  const pNombre = p.nombre?.toLowerCase().trim() || '';
+                  return pNombre === nombreTexto || 
+                         pNombre.includes(nombreTexto) || 
+                         nombreTexto.includes(pNombre);
+                });
+                if (producto) log(`   ✓ Encontrado por DOM: ${producto.id} (${producto.nombre})`);
               }
             }
-          }
-          
-          if (!producto && parsed.identifier) {
-            const searchName = parsed.identifier.replace(/-/g, ' ').toLowerCase();
-            producto = productosCache.find(p => 
-              p.nombre?.toLowerCase().includes(searchName) ||
-              searchName.includes(p.nombre?.toLowerCase())
-            );
+            
+            // Buscar otros bindings en el contenedor que puedan indicar el producto
+            if (!producto) {
+              const otherBindings = container.querySelectorAll('[data-mineiro-bind*="producto-"]');
+              otherBindings.forEach(otherEl => {
+                if (producto) return;
+                const otherBinding = otherEl.dataset.mineiroBind;
+                const otherParsed = parseBinding(otherBinding);
+                if (otherParsed?.identifier) {
+                  producto = productosCache.find(p => p.dom_id === otherParsed.identifier);
+                  if (producto) log(`   ✓ Encontrado por binding hermano: ${producto.id}`);
+                }
+              });
+            }
           }
         }
         
+        // Estrategia 5: Fallback a site_config si no hay productos en BD
         if (!producto && productosCache.length === 0) {
           if (!tiendaData || !tiendaData.id) {
             throw new Error("Tienda no configurada");
           }
           
+          log(`   ⚠️ Sin productos en cache, guardando en site_config`);
           const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
           if (!siteConfig.productos) siteConfig.productos = {};
           if (!siteConfig.productos[parsed.identifier]) siteConfig.productos[parsed.identifier] = {};
@@ -4386,7 +4478,15 @@
         }
         
         if (!producto) {
-          throw new Error(`Producto no encontrado: ${parsed.identifier}`);
+          // Mostrar info de debug para ayudar a identificar el problema
+          warn(`❌ Producto no encontrado: ${parsed.identifier}`);
+          warn(`   Productos disponibles:`, productosCache.map(p => ({ id: p.id, dom_id: p.dom_id, nombre: p.nombre })));
+          throw new Error(`Producto no encontrado: ${parsed.identifier}. Verifica que el dom_id del binding coincida con algún producto.`);
+        }
+
+        // Validar que el producto tenga un ID válido
+        if (!producto.id) {
+          throw new Error(`Producto encontrado pero sin ID válido: ${producto.nombre}`);
         }
 
         const updateData = {};
@@ -4400,6 +4500,8 @@
           updateData[parsed.field] = value;
         }
 
+        log(`   📤 Guardando: producto.${parsed.field} = ${value} (ID: ${producto.id})`);
+
         apiPayload = {
           action: "update",
           table: "productos",
@@ -4407,6 +4509,7 @@
           where: { id: producto.id }
         };
 
+        // Actualizar cache local
         Object.assign(producto, updateData);
         break;
       }
