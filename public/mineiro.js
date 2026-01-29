@@ -19,6 +19,8 @@
 (function() {
   "use strict";
 
+  window.MINEIRO_UNIFIED_LOADED = true;
+
   const VERSION = "6.1.0";
   const SUPABASE_URL = "https://zzgyczbiufafthizurbv.supabase.co";
   const SUPABASE_CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";

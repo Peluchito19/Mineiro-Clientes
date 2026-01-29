@@ -111,10 +111,10 @@ function SnippetGenerator({ productId, productName, categoria, isNew }) {
 
   const snippets = {
     section: `<!-- Pega esto UNA VEZ donde quieras mostrar todos los productos de "${categoria || "General"}" -->
-<div data-mineiro-section="${categoria || "General"}"></div>
+  <div data-mineiro-section="${categoria || "General"}"></div>
 
-<!-- Script al final del body (solo una vez) -->
-<script src="${siteUrl}/mineiro-engine.js"></script>`,
+  <!-- Script al final del body (solo una vez) -->
+  <script src="${siteUrl}/mineiro.js" data-mineiro-site="tu-sitio"></script>`,
 
     categoryBindings: `<!-- Bindings para la categoría "${categoria || "General"}" -->
 <!-- Botón de categoría (se activa automáticamente para filtrar) -->

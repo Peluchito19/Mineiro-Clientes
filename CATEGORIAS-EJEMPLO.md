@@ -177,8 +177,8 @@ Donde:
     <div class="products-container" data-mineiro-section="Todas Las Pizzas" data-mineiro-category-display></div>
   </div>
 
-  <!-- Script Mineiro Engine -->
-  <script src="https://pizzeria-kairos.vercel.app/mineiro-engine.js"></script>
+  <!-- Script Mineiro (solo editor visual) -->
+  <script src="https://mineiro-clientes.vercel.app/mineiro.js" data-mineiro-site="tu-sitio"></script>
 </body>
 </html>
 ```

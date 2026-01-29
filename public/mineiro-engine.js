@@ -2,6 +2,20 @@
 (function () {
   "use strict";
 
+  const hasUnifiedScript =
+    window.MINEIRO_UNIFIED_LOADED ||
+    document.querySelector("script[src*='mineiro.js']");
+  const allowEngine =
+    document.currentScript?.dataset?.mineiroEngine === "true" ||
+    document.querySelector("script[data-mineiro-engine='true']");
+
+  if (hasUnifiedScript && !allowEngine) {
+    console.warn(
+      "[Mineiro Engine] Desactivado: se detectó mineiro.js. Para forzar, usa data-mineiro-engine='true'."
+    );
+    return;
+  }
+
   const SUPABASE_CDN =
     "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
 
