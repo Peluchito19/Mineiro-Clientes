@@ -63,7 +63,20 @@
   const parsePrice = (text) => {
     if (!text) return null;
     if (typeof text === 'number') return text;
-    const cleaned = String(text).replace(/[^\d.,]/g, "").replace(",", ".");
+    // Limpiar: remover todo excepto dígitos, puntos y comas
+    let cleaned = String(text).replace(/[^\d.,]/g, "");
+    // En formato chileno, el punto es separador de miles, no decimal
+    // Ej: "12.990" = 12990, "1.500.000" = 1500000
+    // Si hay múltiples puntos o el punto está seguido de 3 dígitos al final, son separadores de miles
+    if ((cleaned.match(/\./g) || []).length >= 1) {
+      // Verificar si el punto es separador de miles (seguido de exactamente 3 dígitos)
+      if (/\.\d{3}(?:\.|$)/.test(cleaned) || /\.\d{3}$/.test(cleaned)) {
+        // Son separadores de miles, eliminarlos
+        cleaned = cleaned.replace(/\./g, "");
+      }
+    }
+    // Si hay coma, asumimos que es decimal (formato europeo)
+    cleaned = cleaned.replace(",", ".");
     const num = parseFloat(cleaned);
     return isNaN(num) ? null : num;
   };
@@ -528,7 +541,8 @@
       } else {
         el.textContent = value;
       }
-    } else if (field === "precio" || field.endsWith(".precio") || field === "price") {
+    } else if (field === "precio" || field.startsWith("precio.") || field.endsWith(".precio") || field === "price" || field.includes("precio")) {
+      // Formatear cualquier campo relacionado con precio
       el.textContent = typeof value === "number" ? formatCLP(value) : value;
     } else if (field === "rating" || field === "estrellas") {
       const stars = parseInt(value, 10) || 0;
@@ -4125,7 +4139,8 @@
     const field = parsed?.field || binding;
     
     isImage = imageFields.some(f => field === f || field.endsWith(`.${f}`) || field.includes(f)) || tagName === "img";
-    isPrice = priceFields.some(f => field === f || field.endsWith(`.${f}`));
+    // Detectar precios: "precio", "precio.fam", "precio.ind", etc.
+    isPrice = priceFields.some(f => field === f || field.startsWith(`${f}.`) || field.endsWith(`.${f}`) || field.includes(f));
     isLink = linkFields.some(f => field === f || field.endsWith(`.${f}`)) || tagName === "a";
 
     if (isImage) {
@@ -5106,7 +5121,10 @@
     }
     
     if (isPrice) {
-      value = parseFloat(plainTextValue) || 0;
+      // Usar parsePrice para manejar formatos de moneda correctamente (ej: "$12.990" -> 12990)
+      value = parsePrice(plainTextValue) || 0;
+      // Asegurar que sea un entero para CLP (sin decimales)
+      value = Math.round(value);
       valueForAPI = value;
       plainTextValue = value;
     }
@@ -5144,6 +5162,9 @@
         }
         // Limpiar estilo personalizado
         delete el.dataset.mineiroStyle;
+      } else if (isPrice) {
+        // Para precios, siempre usar applyValueToElement para formatear correctamente
+        applyValueToElement(el, value, parsed.field);
       } else if (richHTML || richEditor) {
         // Si hay contenido HTML enriquecido, aplicarlo directamente
         el.innerHTML = value;
@@ -5171,6 +5192,9 @@
             if (selectedStyle === "original" && htmlOriginalDelCodigo.get(otherEl)) {
               const otherOriginal = htmlOriginalDelCodigo.get(otherEl);
               otherEl.innerHTML = otherOriginal.innerHTML;
+            } else if (isPrice) {
+              // Para precios, siempre usar applyValueToElement para formatear
+              applyValueToElement(otherEl, value, parsed.field);
             } else if (richHTML || richEditor) {
               otherEl.innerHTML = value;
             } else {
