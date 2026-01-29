@@ -844,9 +844,38 @@
       const binding = el.dataset.mineiroBind;
       const parsed = parseBinding(binding);
       if (parsed && parsed.type === "producto") {
-        const value = parsed.field.includes(".")
-          ? getNestedValue(producto, parsed.field)
-          : producto[parsed.field];
+        let value;
+        
+        if (parsed.field.includes(".")) {
+          // Campo anidado: precio.fam -> producto.precio.fam o producto.configuracion.precios.fam
+          value = getNestedValue(producto, parsed.field);
+          
+          // Si no se encuentra, buscar en configuracion.precios
+          if (value === undefined && parsed.field.startsWith("precio.")) {
+            const tamano = parsed.field.split(".")[1]; // "fam", "ind", "xl"
+            value = getNestedValue(producto, `configuracion.precios.${tamano}`);
+          }
+          
+          // Si aún no se encuentra, intentar buscar variantes
+          if (value === undefined && parsed.field.startsWith("precio.")) {
+            const tamano = parsed.field.split(".")[1];
+            const variantes = producto.configuracion?.variantes || [];
+            const variante = variantes.find(v => 
+              v.nombre?.toLowerCase().includes(tamano) || 
+              v.id === tamano ||
+              v.tipo === tamano
+            );
+            if (variante) value = variante.precio;
+          }
+          
+          // Fallback: usar precio base si es campo de precio
+          if (value === undefined && parsed.field.startsWith("precio")) {
+            value = producto.precio;
+          }
+        } else {
+          value = producto[parsed.field];
+        }
+        
         if (value !== undefined) {
           applyValueToElement(el, value, parsed.field);
         }
@@ -4627,13 +4656,14 @@
           }
         }
         
-        // Estrategia 5: Fallback a site_config si no hay productos en BD
-        if (!producto && productosCache.length === 0) {
+        // Estrategia 5: Fallback a site_config si el producto no existe en BD
+        // IMPORTANTE: Esto permite editar productos que están en el HTML pero no en la base de datos
+        if (!producto) {
           if (!tiendaData || !tiendaData.id) {
             throw new Error("Tienda no configurada");
           }
           
-          log(`   ⚠️ Sin productos en cache, guardando en site_config`);
+          log(`   ⚠️ Producto "${parsed.identifier}" no encontrado en BD, guardando en site_config`);
           const siteConfig = JSON.parse(JSON.stringify(tiendaData?.site_config || {}));
           if (!siteConfig.productos) siteConfig.productos = {};
           if (!siteConfig.productos[parsed.identifier]) siteConfig.productos[parsed.identifier] = {};
@@ -4649,13 +4679,6 @@
           
           tiendaData.site_config = siteConfig;
           break;
-        }
-        
-        if (!producto) {
-          // Mostrar info de debug para ayudar a identificar el problema
-          warn(`❌ Producto no encontrado: ${parsed.identifier}`);
-          warn(`   Productos disponibles:`, productosCache.map(p => ({ id: p.id, dom_id: p.dom_id, nombre: p.nombre })));
-          throw new Error(`Producto no encontrado: ${parsed.identifier}. Verifica que el dom_id del binding coincida con algún producto.`);
         }
 
         // Validar que el producto tenga un ID válido
