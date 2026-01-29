@@ -634,20 +634,32 @@
       }
 
       case "producto": {
-        // 🎯 IMPORTANTE: Solo aplicar valores que el usuario haya editado explícitamente
-        // El HTML ya tiene los precios correctos, NO debemos sobrescribirlos con valores de BD
+        // 🎯 Buscar valores editados por el usuario en site_config.productos
+        // Estructura: site_config.productos[identifier][field] = value
+        const productosConfig = siteConfig.productos || {};
+        const productoConfig = productosConfig[parsed.identifier] || {};
         
-        // 🥇 ÚNICO: Buscar en site_config.productos (donde se guardan las ediciones del usuario)
-        value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
+        // Buscar el campo directamente (puede ser "precio", "precio.fam", "nombre", etc.)
+        value = productoConfig[parsed.field];
+        
+        // 🔍 Debug log
+        if (value !== undefined) {
+          log(`✓ Hidratando ${parsed.identifier}.${parsed.field} = ${value} (desde site_config.productos)`);
+        }
         
         // 🥈 Fallback: Buscar en config.menu.{categoria}.{producto}.{campo}
         if (value === undefined && parsed.categoria) {
-          value = getNestedValue(siteConfig, `config.menu.${parsed.categoria}.${parsed.identifier}.${parsed.field}`);
+          const menuConfig = siteConfig.config?.menu || {};
+          const categoriaConfig = menuConfig[parsed.categoria] || {};
+          const menuProducto = categoriaConfig[parsed.identifier] || {};
+          value = menuProducto[parsed.field];
+          if (value !== undefined) {
+            log(`✓ Hidratando ${parsed.identifier}.${parsed.field} = ${value} (desde config.menu)`);
+          }
         }
         
-        // ⚠️ NO buscar en productos de BD para precios
-        // El HTML ya tiene los precios correctos del diseño
-        // Solo usar BD para campos que NO son precio y que el usuario no haya editado
+        // 🥉 Fallback: Buscar en productos de BD (para campos que no son precio)
+        // Solo si el usuario no ha editado este campo
         if (value === undefined && !parsed.field.includes('precio')) {
           const searchId = parsed.identifier.toLowerCase();
           let producto = productos.find(p => p.dom_id === parsed.identifier)
@@ -5488,6 +5500,13 @@
         log("Tienda cargada:", tiendaData.nombre_negocio, "(id:", tiendaData.id + ")");
         log("Slug en BD:", tiendaData.slug);
         log("URL web:", tiendaData.url_web);
+        
+        // 🔍 Debug: Mostrar site_config.productos si existe
+        if (tiendaData.site_config?.productos) {
+          log("📦 site_config.productos encontrado:", JSON.stringify(tiendaData.site_config.productos, null, 2));
+        } else {
+          log("⚠️ No hay site_config.productos guardado");
+        }
 
         log(`Cargados: ${productosCache.length} productos, ${testimoniosCache.length} testimonios`);
         if (productosCache.length > 0) {
