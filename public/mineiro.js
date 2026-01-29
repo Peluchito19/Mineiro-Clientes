@@ -376,6 +376,68 @@
     log('✓ Todos los elementos preservados han sido limpiados');
   };
   
+  // 🔥 FUNCIÓN NUCLEAR: Limpiar TODOS los datos de Mineiro (localStorage + site_config.productos)
+  const clearAllMineiroData = async () => {
+    log('🔥 Limpiando TODOS los datos de Mineiro...');
+    
+    // 1. Limpiar localStorage
+    clearAllPreserved();
+    localEdits.clear();
+    htmlOriginalDelCodigo.clear();
+    
+    // Limpiar cualquier otro item de localStorage relacionado con mineiro
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.includes('mineiro') || key.includes('Mineiro'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+    log(`   ✓ Limpiados ${keysToRemove.length} items de localStorage`);
+    
+    // 2. Limpiar site_config.productos en la base de datos
+    if (tiendaData?.id && tiendaData?.site_config) {
+      try {
+        const newSiteConfig = JSON.parse(JSON.stringify(tiendaData.site_config));
+        delete newSiteConfig.productos; // Eliminar todos los productos guardados en site_config
+        
+        const response = await fetch(EDIT_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update',
+            table: 'tiendas',
+            data: { site_config: newSiteConfig },
+            where: { id: tiendaData.id }
+          })
+        });
+        
+        if (response.ok) {
+          tiendaData.site_config = newSiteConfig;
+          log('   ✓ site_config.productos limpiado de la base de datos');
+        }
+      } catch (err) {
+        warn('Error limpiando site_config:', err);
+      }
+    }
+    
+    // 3. Quitar atributos de hidratación de todos los elementos
+    document.querySelectorAll('[data-mineiro-hydrated]').forEach(el => {
+      el.removeAttribute('data-mineiro-hydrated');
+    });
+    
+    log('✅ TODOS los datos de Mineiro han sido limpiados. Recarga la página para ver los valores originales del HTML.');
+    
+    // Mostrar alerta al usuario
+    alert('✅ Datos limpiados correctamente.\n\nRecarga la página (F5) para ver los valores originales de tu HTML.');
+    
+    return true;
+  };
+  
+  // Exponer función globalmente para poder usarla desde consola
+  window.clearAllMineiroData = clearAllMineiroData;
+  
   // Set de bindings que fueron preservados (persiste entre recargas)
   const preservedBindingsSet = loadPreservedBindings();
 
@@ -3530,6 +3592,9 @@
         <button class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-settings-btn" title="Configuración">
           ⚙️
         </button>
+        <button class="mineiro-admin-btn" id="mineiro-reset-btn" title="Limpiar todos los cambios guardados" style="background:#dc2626">
+          🗑️ Reset
+        </button>
         <button class="mineiro-admin-btn mineiro-admin-btn-primary" onclick="window.MineiroAdmin.exitToPanel()">
           ✓ Salir
         </button>
@@ -3551,6 +3616,11 @@
     document.getElementById("mineiro-undo-btn").onclick = undoLastChange;
     document.getElementById("mineiro-add-btn").onclick = showAddContentPanel;
     document.getElementById("mineiro-settings-btn").onclick = showSettingsPanel;
+    document.getElementById("mineiro-reset-btn").onclick = () => {
+      if (confirm('⚠️ ¿Estás seguro de que quieres borrar TODOS los cambios guardados?\n\nEsto eliminará:\n- Cambios de precios\n- Cambios de texto\n- Cualquier edición guardada\n\nLa página mostrará los valores originales del HTML.')) {
+        clearAllMineiroData();
+      }
+    };
 
     // Add DOUBLE-click listener for editing (single click = normal navigation)
     document.addEventListener("dblclick", handleAdminDoubleClick, true);
