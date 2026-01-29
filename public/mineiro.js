@@ -3888,22 +3888,6 @@
     log(`✏️ Doble-click: Editando nombre de enlace: ${binding}`);
   };
 
-    // Para TODO lo demás (precios, títulos, textos, imágenes): ABRIR EDITOR
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (selectedElement && selectedElement !== el) {
-      selectedElement.classList.remove("mineiro-selected");
-    }
-    selectedElement = el;
-    el.classList.add("mineiro-selected");
-
-    saveComputedStyles(el);
-    showEditPopup(el);
-    log(`   → Abriendo editor para: ${el.dataset.mineiroBind}`);
-  };
-
-
   // Hint para enlaces (doble-click para editar)
   const showLinkEditHint = (el) => {
     document.querySelectorAll('.mineiro-nav-hint').forEach(h => h.remove());
