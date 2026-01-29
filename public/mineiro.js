@@ -1828,6 +1828,9 @@
         const clonedCard = existingCard.cloneNode(true);
         clonedCard.dataset.mineiroProductId = domId;
         
+        // Remover IDs duplicados
+        clonedCard.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+        
         // Actualizar los bindings y valores
         const updateElement = (selector, value, bindSuffix) => {
           const el = clonedCard.querySelector(selector);
@@ -1848,27 +1851,45 @@
           imgEl.src = producto.imagen_url || '';
           imgEl.alt = producto.nombre || '';
           imgEl.dataset.mineiroBind = `producto-${domId}.imagen_url`;
+          // Remover lazy loading issues
+          imgEl.removeAttribute('loading');
         }
         
-        // Buscar y actualizar nombre
-        const nombreEl = clonedCard.querySelector('[data-mineiro-bind*=".nombre"], h1, h2, h3, h4, .product-name, .item-name, .nombre');
+        // Buscar y actualizar nombre - priorizar por data-mineiro-bind, luego por clase/tag
+        const nombreEl = clonedCard.querySelector('[data-mineiro-bind*=".nombre"]') 
+                      || clonedCard.querySelector('h1, h2, h3, h4, .product-name, .item-name, .nombre, [class*="name"], [class*="title"]');
         if (nombreEl) {
           nombreEl.textContent = producto.nombre;
           nombreEl.dataset.mineiroBind = `producto-${domId}.nombre`;
         }
         
         // Buscar y actualizar precio
-        const precioEl = clonedCard.querySelector('[data-mineiro-bind*=".precio"], .price, .precio, [class*="price"]');
+        const precioEl = clonedCard.querySelector('[data-mineiro-bind*=".precio"]') 
+                      || clonedCard.querySelector('.price, .precio, [class*="price"], [class*="precio"]');
         if (precioEl) {
           precioEl.textContent = precio;
           precioEl.dataset.mineiroBind = `producto-${domId}.precio`;
         }
         
         // Buscar y actualizar descripción
-        const descEl = clonedCard.querySelector('[data-mineiro-bind*=".descripcion"], .description, .descripcion, p');
-        if (descEl && producto.descripcion) {
-          descEl.textContent = producto.descripcion;
-          descEl.dataset.mineiroBind = `producto-${domId}.descripcion`;
+        const descEl = clonedCard.querySelector('[data-mineiro-bind*=".descripcion"]') 
+                    || clonedCard.querySelector('.description, .descripcion, [class*="desc"], p:not([class*="price"])');
+        if (descEl) {
+          if (producto.descripcion) {
+            descEl.textContent = producto.descripcion;
+            descEl.dataset.mineiroBind = `producto-${domId}.descripcion`;
+            descEl.style.display = '';
+          } else {
+            descEl.style.display = 'none';
+          }
+        }
+        
+        // Buscar y actualizar categoría si existe
+        const catEl = clonedCard.querySelector('[data-mineiro-bind*=".categoria"]') 
+                   || clonedCard.querySelector('.category, .categoria, [class*="category"]');
+        if (catEl && producto.categoria) {
+          catEl.textContent = producto.categoria;
+          catEl.dataset.mineiroBind = `producto-${domId}.categoria`;
         }
         
         // Hacer editable si está en modo admin
@@ -1879,17 +1900,24 @@
           });
         }
         
-        log(`✓ Tarjeta clonada de diseño existente`);
+        log(`✓ Tarjeta clonada de diseño existente para: ${producto.nombre}`);
         return clonedCard;
       }
     }
     
-    // Fallback: crear tarjeta con diseño por defecto
+    // Detectar estilo del sitio
+    const siteStyle = detectSiteStyle();
+    
+    // Fallback: crear tarjeta con diseño adaptativo
     const card = document.createElement('div');
     card.className = 'mineiro-product-card';
     card.dataset.mineiroProductId = domId;
+    
+    const cardBg = siteStyle.isDark ? '#1e293b' : '#ffffff';
+    const borderColor = siteStyle.isDark ? '#334155' : '#e2e8f0';
+    
     card.innerHTML = `
-      <div style="background:#1e293b;border-radius:12px;overflow:hidden;border:1px solid #334155;transition:transform 0.2s">
+      <div style="background:${cardBg};border-radius:12px;overflow:hidden;border:1px solid ${borderColor};transition:transform 0.2s">
         ${producto.imagen_url ? `
           <img 
             data-mineiro-bind="producto-${domId}.imagen_url" 
@@ -1898,27 +1926,27 @@
             style="width:100%;height:160px;object-fit:cover"
           />
         ` : `
-          <div style="width:100%;height:160px;background:#0f172a;display:flex;align-items:center;justify-content:center;color:#64748b">
+          <div style="width:100%;height:160px;background:${siteStyle.isDark ? '#0f172a' : '#f1f5f9'};display:flex;align-items:center;justify-content:center;color:${siteStyle.subtextColor}">
             📷 Sin imagen
           </div>
         `}
         <div style="padding:16px">
-          <div style="font-size:12px;color:#f59e0b;margin-bottom:4px;text-transform:uppercase">
+          <div style="font-size:12px;color:${siteStyle.accentColor};margin-bottom:4px;text-transform:uppercase">
             ${producto.categoria || 'Sin categoría'}
           </div>
           <h3 
             data-mineiro-bind="producto-${domId}.nombre"
-            style="font-size:16px;font-weight:600;color:#f1f5f9;margin:0 0 8px 0"
+            style="font-size:16px;font-weight:600;color:${siteStyle.textColor};margin:0 0 8px 0"
           >${producto.nombre}</h3>
           ${producto.descripcion ? `
             <p 
               data-mineiro-bind="producto-${domId}.descripcion"
-              style="font-size:13px;color:#94a3b8;margin:0 0 12px 0"
+              style="font-size:13px;color:${siteStyle.subtextColor};margin:0 0 12px 0"
             >${producto.descripcion}</p>
           ` : ''}
           <div 
             data-mineiro-bind="producto-${domId}.precio"
-            style="font-size:20px;font-weight:700;color:#f59e0b"
+            style="font-size:20px;font-weight:700;color:${siteStyle.accentColor}"
           >${precio}</div>
         </div>
       </div>
@@ -2137,6 +2165,9 @@
       if (result.success) {
         tiendaData.site_config = siteConfig;
         
+        // 🆕 CREAR SECCIÓN VISIBLE EN LA PÁGINA
+        tryCreateCategorySection(nombre, slug, descripcion);
+        
         btn.innerHTML = '✅ ¡Categoría creada!';
         btn.style.background = '#22c55e';
         
@@ -2159,6 +2190,109 @@
         btn.disabled = false;
       }, 2000);
     }
+  };
+
+  // 🆕 Función para crear una sección de categoría en el DOM
+  const tryCreateCategorySection = (nombre, slug, descripcion = '') => {
+    // Verificar si ya existe una sección con esta categoría
+    const existingSection = document.querySelector(`[data-mineiro-section="${nombre}"], [data-mineiro-category="${slug}"]`);
+    if (existingSection) {
+      log(`Sección para "${nombre}" ya existe`);
+      return existingSection;
+    }
+    
+    // Buscar un contenedor existente de productos para clonar su estilo
+    const existingProductContainer = document.querySelector('[data-mineiro-section], [class*="product"][class*="grid"], [class*="menu"][class*="grid"], .productos-grid, .menu-items');
+    
+    // Buscar dónde insertar la nueva sección (después de la última sección de productos)
+    let insertAfter = null;
+    const allSections = document.querySelectorAll('section, [class*="section"], [data-mineiro-section]');
+    if (allSections.length > 0) {
+      insertAfter = allSections[allSections.length - 1];
+    }
+    
+    // Detectar el estilo del sitio
+    const siteStyle = detectSiteStyle();
+    
+    // Crear la sección
+    const section = document.createElement('section');
+    section.dataset.mineiroSection = nombre;
+    section.dataset.mineiroCategory = slug;
+    section.className = 'mineiro-category-section';
+    
+    // Aplicar estilos basados en el diseño del sitio
+    section.style.cssText = `
+      padding: 40px 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    `;
+    
+    section.innerHTML = `
+      <div class="mineiro-category-header" style="text-align:center;margin-bottom:30px">
+        <h2 data-mineiro-bind="menu.categorias.${slug}.titulo" style="font-size:28px;font-weight:700;color:${siteStyle.textColor};margin:0 0 10px 0">${nombre}</h2>
+        ${descripcion ? `<p data-mineiro-bind="menu.categorias.${slug}.descripcion" style="color:${siteStyle.subtextColor};font-size:14px;margin:0">${descripcion}</p>` : ''}
+      </div>
+      <div class="mineiro-products-grid" data-mineiro-section="${nombre}" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:20px">
+        <!-- Los productos se agregarán aquí -->
+      </div>
+    `;
+    
+    // Insertar en el DOM
+    if (insertAfter) {
+      insertAfter.after(section);
+    } else {
+      // Insertar antes del footer o al final del body
+      const footer = document.querySelector('footer, [class*="footer"]');
+      if (footer) {
+        footer.before(section);
+      } else {
+        document.body.appendChild(section);
+      }
+    }
+    
+    // Si estamos en modo admin, hacer editables los elementos
+    if (adminMode) {
+      section.querySelectorAll('[data-mineiro-bind]').forEach(el => {
+        el.style.cursor = 'pointer';
+        el.style.outline = '1px dashed rgba(34,211,238,0.4)';
+      });
+    }
+    
+    log(`✓ Sección "${nombre}" creada en el DOM`);
+    return section;
+  };
+  
+  // Detectar el estilo general del sitio para adaptar nuevas secciones
+  const detectSiteStyle = () => {
+    const body = document.body;
+    const computedStyle = window.getComputedStyle(body);
+    const bgColor = computedStyle.backgroundColor;
+    
+    // Determinar si el sitio es oscuro o claro
+    const rgb = bgColor.match(/\d+/g);
+    const isDark = rgb ? (parseInt(rgb[0]) + parseInt(rgb[1]) + parseInt(rgb[2])) / 3 < 128 : true;
+    
+    // Buscar colores predominantes en el sitio
+    const headings = document.querySelectorAll('h1, h2, h3');
+    let textColor = isDark ? '#f1f5f9' : '#1e293b';
+    let subtextColor = isDark ? '#94a3b8' : '#64748b';
+    let accentColor = '#f59e0b'; // Amber por defecto
+    
+    if (headings.length > 0) {
+      const headingStyle = window.getComputedStyle(headings[0]);
+      textColor = headingStyle.color;
+    }
+    
+    // Buscar color de acento
+    const buttons = document.querySelectorAll('button, .btn, [class*="button"]');
+    if (buttons.length > 0) {
+      const btnStyle = window.getComputedStyle(buttons[0]);
+      if (btnStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' && btnStyle.backgroundColor !== 'transparent') {
+        accentColor = btnStyle.backgroundColor;
+      }
+    }
+    
+    return { isDark, textColor, subtextColor, accentColor };
   };
 
   const createNewTestimonio = async () => {
@@ -4300,9 +4434,21 @@
         </div>
       `;
     } else if (isPrice) {
+      // Obtener precio original del HTML para mostrar opción de restaurar
+      const priceOriginal = htmlOriginalDelCodigo.get(el);
+      const originalPriceText = priceOriginal ? priceOriginal.textContent : '';
+      const originalPriceValue = parsePrice(originalPriceText);
       contentHTML = `
         <label>Precio (solo número)</label>
-        <input type="number" id="mineiro-edit-input" value="${escapedValue}" placeholder="1000" step="100" />
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="number" id="mineiro-edit-input" value="${escapedValue}" placeholder="1000" step="100" style="flex:1" />
+          ${originalPriceValue && originalPriceValue !== parsePrice(currentValue) ? `
+            <button type="button" class="mineiro-admin-btn mineiro-admin-btn-secondary" id="mineiro-restore-price-btn" style="padding:8px 12px;white-space:nowrap" title="Restaurar al precio original del HTML: ${formatCLP(originalPriceValue)}">
+              🔄 ${formatCLP(originalPriceValue)}
+            </button>
+          ` : ''}
+        </div>
+        ${priceOriginal ? `<div style="font-size:11px;color:#64748b;margin-top:4px">💡 Precio original del HTML: ${originalPriceText}</div>` : ''}
       `;
     } else if (isLink) {
       contentHTML = `
@@ -4384,6 +4530,37 @@
       e.stopPropagation();
       closePopup();
     });
+
+    // Manejo de precios - botón restaurar original
+    if (isPrice) {
+      const restorePriceBtn = document.getElementById("mineiro-restore-price-btn");
+      if (restorePriceBtn) {
+        restorePriceBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const priceOriginal = htmlOriginalDelCodigo.get(el);
+          if (priceOriginal) {
+            const originalValue = parsePrice(priceOriginal.textContent);
+            if (originalValue !== null) {
+              input.value = originalValue;
+              log(`✓ Precio restaurado al original: ${originalValue}`);
+              
+              // También eliminar de site_config para que no se sobrescriba
+              try {
+                await deleteFromSiteConfigProductos(parsed);
+                el.textContent = priceOriginal.textContent;
+                
+                // Mostrar feedback
+                restorePriceBtn.innerHTML = '✅ Restaurado';
+                restorePriceBtn.disabled = true;
+                setTimeout(() => closePopup(), 800);
+              } catch (err) {
+                warn('Error al restaurar precio:', err.message);
+              }
+            }
+          }
+        });
+      }
+    }
 
     // Manejo de imágenes
     if (isImage) {
