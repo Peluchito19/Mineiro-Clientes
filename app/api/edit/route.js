@@ -113,6 +113,30 @@ export async function POST(request) {
         console.log("Delete exception (ignorada):", deleteErr.message);
         result = [];
       }
+    } else if (action === "insert") {
+      // INSERT: Crear nuevo registro
+      // Validar que el precio no exceda el límite de integer si existe
+      if (data.precio && typeof data.precio === 'number') {
+        const MAX_INT = 2147483647;
+        if (data.precio > MAX_INT) {
+          return NextResponse.json({ 
+            error: `El precio ${data.precio} es demasiado grande. Máximo: ${MAX_INT.toLocaleString()}` 
+          }, { status: 400, headers: corsHeaders });
+        }
+      }
+      
+      const { data: inserted, error } = await supabaseAdmin
+        .from(table)
+        .insert(data)
+        .select();
+      
+      if (error) {
+        console.error("Insert error:", error);
+        return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
+      }
+      
+      result = inserted && inserted.length > 0 ? inserted[0] : null;
+      console.log("Producto insertado:", result?.id);
     } else {
       return NextResponse.json({ error: "Acción no válida" }, { status: 400, headers: corsHeaders });
     }

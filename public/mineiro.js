@@ -1592,11 +1592,20 @@
 
   const createNewProduct = async () => {
     const nombre = document.getElementById('add-producto-nombre').value.trim();
-    const precio = parseFloat(document.getElementById('add-producto-precio').value) || 0;
+    const precioRaw = parseFloat(document.getElementById('add-producto-precio').value) || 0;
     const catSelect = document.getElementById('add-producto-categoria');
     const descripcion = document.getElementById('add-producto-descripcion').value.trim();
     const imageDrop = document.getElementById('add-producto-image-drop');
     const imagenUrl = imageDrop?.dataset?.imageUrl || '';
+
+    // Validar precio máximo (límite de INTEGER en PostgreSQL)
+    const MAX_PRECIO = 2147483647;
+    const precio = Math.min(Math.floor(precioRaw), MAX_PRECIO);
+    
+    if (precioRaw > MAX_PRECIO) {
+      alert(`El precio es demasiado grande. Máximo permitido: $${MAX_PRECIO.toLocaleString()}`);
+      return;
+    }
 
     let categoria = catSelect?.value || '';
 
@@ -3529,16 +3538,25 @@
     // Save product
     document.getElementById('quick-add-save').onclick = async () => {
       const nombre = document.getElementById('quick-add-nombre').value.trim();
-      const precio = parseFloat(document.getElementById('quick-add-precio').value) || 0;
+      const precioRaw = parseFloat(document.getElementById('quick-add-precio').value) || 0;
       const descripcion = document.getElementById('quick-add-descripcion').value.trim();
       const imagenUrl = imageUrlInput.value;
+      
+      // Validar precio máximo (límite de INTEGER en PostgreSQL)
+      const MAX_PRECIO = 2147483647;
+      const precio = Math.min(Math.floor(precioRaw), MAX_PRECIO);
+      
+      if (precioRaw > MAX_PRECIO) {
+        alert(`El precio es demasiado grande. Máximo permitido: $${MAX_PRECIO.toLocaleString()}`);
+        return;
+      }
       
       if (!nombre) {
         alert('El nombre es requerido');
         return;
       }
-      if (!precio) {
-        alert('El precio es requerido');
+      if (!precio || precio <= 0) {
+        alert('El precio es requerido y debe ser mayor a 0');
         return;
       }
       
