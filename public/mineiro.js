@@ -3264,7 +3264,7 @@
         <span>Mineiro Editor</span>
       </div>
       <div class="mineiro-admin-center">
-        <div class="mineiro-admin-hint">👆 Doble-click para editar | Click normal = navegar</div>
+        <div class="mineiro-admin-hint">Click para editar | Doble-click en enlaces para navegar</div>
         <button class="mineiro-admin-btn mineiro-admin-btn-warning" id="mineiro-undo-btn" style="display:none">
           ↩️ Deshacer
         </button>
@@ -3623,10 +3623,10 @@
     }
   };
 
-  // SINGLE CLICK - Solo resalta elementos editables, NO bloquea navegación
+  // SINGLE CLICK - Abre editor para TODO excepto enlaces (que requieren doble-click)
   const handleAdminSingleClick = (e) => {
     // Ignorar clics en popup o barra de admin
-    if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal")) {
+    if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal, .mineiro-panel")) {
       return;
     }
 
@@ -3641,66 +3641,90 @@
       return;
     }
 
-    // Solo resaltar el elemento - NO bloquear navegación
+    // Verificar si es un enlace de navegación (categorías del menú)
+    const isNavigationLink = el.tagName.toLowerCase() === 'a' || el.closest('a');
+    
+    if (isNavigationLink) {
+      // Para enlaces: solo resaltar, NO abrir editor (requiere doble-click)
+      if (selectedElement && selectedElement !== el) {
+        selectedElement.classList.remove("mineiro-selected");
+      }
+      selectedElement = el;
+      el.classList.add("mineiro-selected");
+      
+      // Mostrar hint de doble-click para editar enlaces
+      if (!el.dataset.mineiroHintShown) {
+        el.dataset.mineiroHintShown = 'true';
+        showLinkEditHint(el);
+      }
+      // NO bloquear - permitir navegación normal
+      return;
+    }
+
+    // Para TODO lo demás (precios, títulos, textos, imágenes): ABRIR EDITOR
+    e.preventDefault();
+    e.stopPropagation();
+
     if (selectedElement && selectedElement !== el) {
       selectedElement.classList.remove("mineiro-selected");
     }
     selectedElement = el;
     el.classList.add("mineiro-selected");
-    
-    // Mostrar hint de doble-click si es la primera vez
-    if (!el.dataset.mineiroHintShown) {
-      el.dataset.mineiroHintShown = 'true';
-      showEditHint(el);
-    }
-    
-    // NO hacer preventDefault - permitir navegación normal en enlaces
+
+    saveComputedStyles(el);
+    showEditPopup(el);
+    log(`Editando: ${el.dataset.mineiroBind}`);
   };
 
-  // DOUBLE CLICK - Abre el editor
+  // DOUBLE CLICK - Solo para editar ENLACES (navegar con click simple)
   const handleAdminDoubleClick = (e) => {
     // Ignorar clics en popup o barra de admin
-    if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal")) {
+    if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal, .mineiro-panel")) {
       return;
     }
 
     const el = e.target.closest("[data-mineiro-bind]");
     if (!el) return;
 
+    // Doble-click SOLO abre editor para ENLACES
+    const isNavigationLink = el.tagName.toLowerCase() === 'a' || el.closest('a');
+    
+    if (!isNavigationLink) {
+      // Para no-enlaces, el click simple ya abrió el editor
+      return;
+    }
+
+    // Para enlaces: doble-click abre el editor
     e.preventDefault();
     e.stopPropagation();
 
-    // Seleccionar elemento
     if (selectedElement && selectedElement !== el) {
       selectedElement.classList.remove("mineiro-selected");
     }
     selectedElement = el;
     el.classList.add("mineiro-selected");
 
-    // Guardar estilos computados para referencia
     saveComputedStyles(el);
-
-    // Abrir editor
     showEditPopup(el);
-    log(`Editando: ${el.dataset.mineiroBind}`);
+    log(`Editando enlace: ${el.dataset.mineiroBind}`);
   };
 
-  // Mostrar hint de doble-click
-  const showEditHint = (el) => {
+  // Hint para enlaces (doble-click para editar)
+  const showLinkEditHint = (el) => {
     document.querySelectorAll('.mineiro-nav-hint').forEach(h => h.remove());
     
     const hint = document.createElement('div');
     hint.className = 'mineiro-nav-hint';
-    hint.innerHTML = `<strong>Doble-click</strong> para editar`;
+    hint.innerHTML = `Click = navegar | <strong>Doble-click</strong> = editar`;
     hint.style.cssText = 'position:fixed;z-index:100003;pointer-events:none;';
     
     const rect = el.getBoundingClientRect();
-    hint.style.top = `${rect.top - 40}px`;
+    hint.style.top = `${Math.max(10, rect.top - 40)}px`;
     hint.style.left = `${rect.left + rect.width/2}px`;
     hint.style.transform = 'translateX(-50%)';
     
     document.body.appendChild(hint);
-    setTimeout(() => hint.remove(), 2000);
+    setTimeout(() => hint.remove(), 2500);
   };
 
   const showEditPopup = (el) => {
@@ -4570,6 +4594,31 @@
       } else {
         // Aplicar valor normal
         applyValueToElement(el, value, parsed.field);
+      }
+      
+      // 🔄 SINCRONIZAR TODOS LOS ELEMENTOS CON EL MISMO BINDING
+      const currentBinding = binding || el.dataset.mineiroBind;
+      if (currentBinding) {
+        document.querySelectorAll(`[data-mineiro-bind="${currentBinding}"]`).forEach(otherEl => {
+          if (otherEl !== el) {
+            // Aplicar el mismo valor a elementos duplicados
+            if (selectedStyle === "original" && htmlOriginalDelCodigo.get(otherEl)) {
+              const otherOriginal = htmlOriginalDelCodigo.get(otherEl);
+              otherEl.innerHTML = otherOriginal.innerHTML;
+            } else if (richHTML || richEditor) {
+              otherEl.innerHTML = value;
+            } else {
+              applyValueToElement(otherEl, value, parsed.field);
+            }
+            // Remover de preservados para que se sincronice bien
+            preservedOriginalElements.delete(otherEl);
+            delete otherEl.dataset.mineiroPreserved;
+            log(`✓ Sincronizado elemento duplicado: ${currentBinding}`);
+          }
+        });
+        
+        // Remover este binding de los preservados en localStorage
+        removeFromPreserved(currentBinding);
       }
       
       // Aplicar texto visible si es un enlace
