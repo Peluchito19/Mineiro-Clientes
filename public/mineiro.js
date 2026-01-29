@@ -264,6 +264,21 @@
       return { type: "producto", identifier: menuMatch[2], field: menuMatch[3] };
     }
 
+    // 🍕 FORMATO ESPECIAL: menu.{categoria}.{producto}.{campo}
+    // Ej: menu.pizzas.napolitana.precio.fam -> producto "napolitana", campo "precio.fam"
+    const menuProductMatch = binding.match(/^menu\.([a-zA-Z0-9\-_]+)\.([a-zA-Z0-9\-_]+)\.(.+)$/);
+    if (menuProductMatch) {
+      const categoria = menuProductMatch[1]; // "pizzas"
+      const productoId = menuProductMatch[2]; // "napolitana"
+      const campo = menuProductMatch[3]; // "precio.fam" o "nombre" o "ingredientes"
+      return { 
+        type: "producto", 
+        identifier: productoId, 
+        field: campo,
+        categoria: categoria
+      };
+    }
+
     // Cualquier otro formato con punto: "seccion.campo"
     if (binding.includes(".")) {
       const parts = binding.split(".");
@@ -279,7 +294,6 @@
         "about": "config",
         "contact": "footer",
         "social": "footer",
-        "menu": "config",
         "services": "config",
         "features": "config",
       };
@@ -503,16 +517,58 @@
       }
 
       case "producto": {
-        // Primero buscar en productos de BD
-        const producto = productos.find(p => p.dom_id === parsed.identifier)
-                      || productos.find(p => String(p.id) === parsed.identifier);
+        // 🔍 Buscar producto por dom_id o nombre normalizado
+        const searchId = parsed.identifier.toLowerCase();
+        let producto = productos.find(p => p.dom_id === parsed.identifier)
+                    || productos.find(p => String(p.id) === parsed.identifier)
+                    || productos.find(p => p.nombre?.toLowerCase().replace(/\s+/g, '-') === searchId)
+                    || productos.find(p => p.nombre?.toLowerCase() === searchId.replace(/-/g, ' '))
+                    || productos.find(p => p.nombre?.toLowerCase().includes(searchId.replace(/-/g, ' ')));
+        
         if (producto) {
-          value = parsed.field.includes(".")
-            ? getNestedValue(producto, parsed.field)
-            : producto[parsed.field];
-        } else {
-          // Fallback: buscar en site_config.productos (para cuando no hay BD)
-          value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
+          // 🎯 El campo puede ser "precio.fam", "precio.ind", "nombre", etc.
+          // Primero intentar obtener el valor directo del producto
+          if (parsed.field.includes(".")) {
+            // Campo anidado: precio.fam -> producto.precio.fam o producto.configuracion.precios.fam
+            value = getNestedValue(producto, parsed.field);
+            
+            // Si no se encuentra, buscar en configuracion.precios
+            if (value === undefined && parsed.field.startsWith("precio.")) {
+              const tamano = parsed.field.split(".")[1]; // "fam", "ind", "xl"
+              value = getNestedValue(producto, `configuracion.precios.${tamano}`);
+            }
+            
+            // Si aún no se encuentra, intentar buscar variantes
+            if (value === undefined && parsed.field.startsWith("precio.")) {
+              const tamano = parsed.field.split(".")[1];
+              const variantes = producto.configuracion?.variantes || [];
+              const variante = variantes.find(v => 
+                v.nombre?.toLowerCase().includes(tamano) || 
+                v.id === tamano ||
+                v.tipo === tamano
+              );
+              if (variante) value = variante.precio;
+            }
+            
+            // Fallback: usar precio base si es campo de precio
+            if (value === undefined && parsed.field.startsWith("precio")) {
+              value = producto.precio;
+            }
+          } else {
+            value = producto[parsed.field];
+          }
+        }
+        
+        // Fallback: buscar en site_config si no hay producto en BD
+        if (value === undefined) {
+          // Buscar en site_config.config.menu.{categoria}.{producto}.{campo}
+          if (parsed.categoria) {
+            value = getNestedValue(siteConfig, `config.menu.${parsed.categoria}.${parsed.identifier}.${parsed.field}`);
+          }
+          // También buscar en site_config.productos
+          if (value === undefined) {
+            value = getNestedValue(siteConfig, `productos.${parsed.identifier}.${parsed.field}`);
+          }
         }
         break;
       }
@@ -3795,8 +3851,8 @@
     }
   };
 
-  // SINGLE CLICK - Para elementos que NO son enlaces: abre editor
-  // Para enlaces: SIEMPRE navega (el click no se bloquea)
+  // SINGLE CLICK - Para elementos que NO son enlaces ni botones de navegación: abre editor
+  // Para enlaces y botones de navegación: SIEMPRE ejecuta su función normal (no se bloquea)
   const handleAdminSingleClick = (e) => {
     // Ignorar clics en popup o barra de admin
     if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal, .mineiro-panel")) {
@@ -3819,10 +3875,19 @@
     const isLink = el.tagName.toLowerCase() === 'a';
     const isInsideLink = linkAncestor !== null;
     
-    // Si es un enlace o está dentro de uno: NO BLOQUEAR, permitir navegación
-    if (isLink || isInsideLink) {
-      log(`🖱️ Click en enlace: ${el.dataset.mineiroBind} → Navegando (doble-click para editar nombre)`);
-      // NO hacer nada - dejar que el navegador navegue normalmente
+    // 🔘 DETECTAR SI ES BOTÓN DE NAVEGACIÓN/FILTRADO
+    const tagName = el.tagName.toLowerCase();
+    const isButton = tagName === 'button';
+    const isInsideButton = el.closest('button') !== null;
+    const isNavElement = el.closest('nav, [role="navigation"], [role="tablist"], .nav, .navigation, .tabs, .category-tabs, .filter-tabs') !== null;
+    const hasOnClick = el.hasAttribute('onclick') || el.closest('[onclick]') !== null;
+    const isInteractiveButton = (isButton || isInsideButton) && (isNavElement || hasOnClick || 
+      el.closest('[data-filter], [data-category], [data-tab], [data-producto-id]') !== null);
+    
+    // Si es un enlace, botón de navegación, o elemento interactivo: NO BLOQUEAR
+    if (isLink || isInsideLink || isInteractiveButton) {
+      log(`🖱️ Click en elemento interactivo: ${el.dataset.mineiroBind} → Ejecutando acción normal (doble-click para editar)`);
+      // NO hacer nada - dejar que ejecute su función normal
       return;
     }
 
@@ -3841,7 +3906,7 @@
     log(`🖱️ Click en elemento: ${el.dataset.mineiroBind} → Abriendo editor`);
   };
 
-  // DOUBLE CLICK - SOLO para editar el NOMBRE de enlaces/categorías
+  // DOUBLE CLICK - Para editar enlaces, botones de navegación y elementos interactivos
   const handleAdminDoubleClick = (e) => {
     // Ignorar clics en popup o barra de admin
     if (e.target.closest(".mineiro-edit-popup, .mineiro-admin-bar, .mineiro-show-bar-btn, .mineiro-category-add-btn, .mineiro-quick-add-modal, .mineiro-panel")) {
@@ -3851,14 +3916,18 @@
     const el = e.target.closest("[data-mineiro-bind]");
     if (!el) return;
 
-    // 🔗 DETECTAR SI ES ENLACE
+    // 🔗 DETECTAR SI ES ENLACE O BOTÓN
     const linkAncestor = el.closest('a');
     const isLink = el.tagName.toLowerCase() === 'a';
     const isInsideLink = linkAncestor !== null;
+    const tagName = el.tagName.toLowerCase();
+    const isButton = tagName === 'button';
+    const isInsideButton = el.closest('button') !== null;
+    const isInteractive = isLink || isInsideLink || isButton || isInsideButton;
     
-    // Doble-click SOLO funciona para enlaces (para editar su nombre)
-    if (!isLink && !isInsideLink) {
-      // Para no-enlaces, el single-click ya abrió el editor
+    // Doble-click funciona para enlaces y botones (para editar su texto)
+    if (!isInteractive) {
+      // Para no-interactivos, el single-click ya abrió el editor
       return;
     }
 
@@ -3869,11 +3938,11 @@
                           !binding.includes('.url') && !binding.includes('.href') && !binding.includes('.link');
     
     if (!isNameBinding) {
-      log(`⚠️ Doble-click en enlace pero binding es URL, ignorando: ${binding}`);
+      log(`⚠️ Doble-click en elemento interactivo pero binding es URL, ignorando: ${binding}`);
       return;
     }
 
-    // Doble-click en nombre de enlace: abrir editor
+    // Doble-click en elemento interactivo: abrir editor
     e.preventDefault();
     e.stopPropagation();
 
@@ -3885,7 +3954,7 @@
 
     saveComputedStyles(el);
     showEditPopup(el);
-    log(`✏️ Doble-click: Editando nombre de enlace: ${binding}`);
+    log(`✏️ Doble-click: Editando elemento interactivo: ${binding}`);
   };
 
   // Hint para enlaces (doble-click para editar)
@@ -4595,7 +4664,37 @@
         }
 
         const updateData = {};
-        if (parsed.field.includes(".")) {
+        
+        // 🎯 Manejar campos de precio con tamaño (precio.fam, precio.ind, precio.xl)
+        if (parsed.field.startsWith("precio.")) {
+          const tamano = parsed.field.split(".")[1]; // "fam", "ind", "xl"
+          
+          // Opción 1: Guardar en configuracion.precios.{tamano}
+          const config = JSON.parse(JSON.stringify(producto.configuracion || {}));
+          if (!config.precios) config.precios = {};
+          config.precios[tamano] = value;
+          
+          // También actualizar variantes si existen
+          if (config.variantes) {
+            const varianteIdx = config.variantes.findIndex(v => 
+              v.nombre?.toLowerCase().includes(tamano) || 
+              v.id === tamano ||
+              v.tipo === tamano
+            );
+            if (varianteIdx >= 0) {
+              config.variantes[varianteIdx].precio = value;
+            }
+          }
+          
+          updateData.configuracion = config;
+          
+          // Si es el precio del tamaño principal (fam suele ser el default), actualizar también precio base
+          if (tamano === 'fam' || tamano === 'familiar') {
+            updateData.precio = value;
+          }
+          
+          log(`   📤 Guardando precio ${tamano}: ${value} en producto ${producto.id}`);
+        } else if (parsed.field.includes(".")) {
           const topField = parsed.field.split(".")[0];
           const rest = parsed.field.split(".").slice(1).join(".");
           const currentFieldValue = JSON.parse(JSON.stringify(producto[topField] || {}));
